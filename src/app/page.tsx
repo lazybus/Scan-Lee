@@ -1,65 +1,108 @@
-import Image from "next/image";
+import Link from "next/link";
+
+import { getDashboardSummary } from "@/lib/documents";
+import { listDocumentTypes } from "@/lib/document-types";
+
+export const dynamic = "force-dynamic";
 
 export default function Home() {
+  const summary = getDashboardSummary();
+  const documentTypes = listDocumentTypes();
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+      <section className="paper-panel grid-rule p-8 sm:p-10">
+        <p className="data-label">Local-First Capture Stack</p>
+        <h1 className="mt-5 max-w-3xl text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
+          Turn photographed cheques and invoices into structured local records.
+        </h1>
+        <p className="mt-6 max-w-2xl text-base leading-8 text-[var(--muted)] sm:text-lg">
+          Scanlee keeps extraction on-device: photos live in your local file system,
+          document definitions live in SQLite, and Ollama runs the vision model on the
+          same machine. Review first, then export to CSV or XLSX.
+        </p>
+        <div className="mt-8 flex flex-wrap gap-4">
+          <Link className="action-button" href="/documents">
+            Start Capturing
+          </Link>
+          <Link className="secondary-button" href="/document-types">
+            Configure Types
+          </Link>
+        </div>
+        <div className="mt-10 grid gap-4 md:grid-cols-3">
+          {[
+            {
+              label: "Document Types",
+              value: summary.documentTypeCount,
+              note: "Schema versions and prompts",
+            },
+            {
+              label: "Stored Captures",
+              value: summary.documentCount,
+              note: "Original files remain local",
+            },
+            {
+              label: "Extracted Records",
+              value: summary.extractedCount,
+              note: "Ready for export or review",
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="border-2 border-[var(--ink)] bg-[var(--panel-strong)] p-5"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              <p className="data-label">{item.label}</p>
+              <p className="mt-3 text-4xl font-semibold">{item.value}</p>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{item.note}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="paper-panel p-6 sm:p-8">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="data-label">Current Defaults</p>
+            <h2 className="mt-3 text-2xl font-semibold">Seeded document types</h2>
+          </div>
+          <span className="status-pill" data-state="reviewed">
+            SQLite Ready
+          </span>
+        </div>
+        <div className="mt-6 space-y-4">
+          {documentTypes.map((documentType) => (
+            <article
+              key={documentType.id}
+              className="border-2 border-[var(--ink)] bg-[var(--panel-strong)] p-5"
             >
-              Learning
-            </a>{" "}
-            center.
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-semibold">{documentType.name}</h3>
+                  <p className="mt-1 font-mono text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
+                    {documentType.slug}
+                  </p>
+                </div>
+                <span className="status-pill" data-state="uploaded">
+                  {documentType.fields.length} fields
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
+                {documentType.description}
+              </p>
+            </article>
+          ))}
+        </div>
+        <div className="divider my-6" />
+        <div className="space-y-3 text-sm leading-7 text-[var(--muted)]">
+          <p>
+            Configure each type with expected labels, aliases, and field kinds.
+          </p>
+          <p>
+            Upload a photo, send it to the local vision model, review the output, and
+            export the approved dataset.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </section>
     </div>
   );
 }

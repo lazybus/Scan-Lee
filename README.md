@@ -1,36 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Scanlee
+
+Scanlee is a local-first document extraction tool for turning photographed documents into structured data using Ollama vision models. You define document types such as invoices or cheques, choose the fields you want to extract, upload one image or process documents in batches, and export the results to CSV or Excel.
+
+The full workflow runs on your machine. Scanlee does not require internet access for document processing, document images stay local, extraction is handled by your local Ollama instance, and the app stores metadata and results in a local SQLite database. That keeps sensitive document data private and under your control.
+
+## What It Does
+
+- Create custom document types with the fields you want to capture
+- Configure extraction for documents such as cheques, invoices, and similar business paperwork
+- Upload a single image or process multiple documents in a batch
+- Send document images to a locally running Ollama vision model
+- Process documents without sending them to external cloud services
+- Review extracted values before exporting
+- Export processed data to CSV or XLSX
+
+## How It Works
+
+1. Create a document type and define the fields you want to extract.
+2. Upload document images and assign them to that document type.
+3. Run extraction through your configured Ollama model.
+4. Review the parsed output.
+5. Export the final structured data to CSV or Excel.
+
+## Tech Stack
+
+- Next.js App Router
+- React
+- SQLite via better-sqlite3
+- Local filesystem storage for uploaded images
+- Ollama for local AI extraction
+- CSV and XLSX export support
+
+## Ollama Configuration
+
+Set the following values in your `.env` file:
+
+```dotenv
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3.5:0.8b
+```
+
+- `OLLAMA_BASE_URL` points to your Ollama server
+- `OLLAMA_MODEL` specifies the model Scanlee should use for extraction
+
+Make sure Ollama is running and that the selected model is already available locally.
+
+## Tested Models
+
+This project has been tested with the following Ollama models:
+
+- Gemma 4 E2B
+- Gemma 4 E4B
+- Gemma 4 26B MoE
+- Qwen 3.5 0.8B
+- Qwen 3.5 models up to the 35B MoE variant
+
+Current observation: Gemma 4 E2B has produced the weakest extraction results so far.
 
 ## Getting Started
 
-First, run the development server:
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Local Data
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `data/scanlee.sqlite` stores local app data and extracted results
+- `data/uploads/` stores uploaded source images
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The project is designed for local, self-hosted document processing with Ollama as the extraction backend.
