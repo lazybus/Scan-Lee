@@ -25,7 +25,16 @@ import {
   useTransition,
 } from "react";
 
-import type { DocumentRecord, DocumentType, ExtractionStatus, FieldDefinition } from "@/lib/domain";
+import type {
+  DocumentRecord,
+  DocumentType,
+  ExtractedRecord,
+  ExtractedValue,
+  ExtractionStatus,
+  FieldDefinition,
+  ProductColumnDefinition,
+  ProductsFieldDefinition,
+} from "@/lib/domain";
 
 type ExtractionResponse = {
   item?: DocumentRecord;
@@ -48,7 +57,8 @@ type EditableDocumentEntry = {
   key: string;
   kind: FieldDefinition["kind"];
   label: string;
-  value: string | number | boolean | null | undefined;
+  value: ExtractedValue | undefined;
+  field: FieldDefinition | null;
 };
 
 type ExtractionProgress = {
@@ -104,9 +114,13 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), maximum);
 }
 
-function formatEditableValue(value: string | number | boolean | null | undefined): string {
+function formatEditableValue(value: ExtractedValue | undefined): string {
   if (value === null || value === undefined) {
     return "";
+  }
+
+  if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
+    return JSON.stringify(value, null, 2);
   }
 
   return String(value);
@@ -244,6 +258,7 @@ function getEditableDocumentEntries(
       kind: "text",
       label: key,
       value,
+      field: null,
     }));
   }
 
@@ -252,6 +267,7 @@ function getEditableDocumentEntries(
     kind: field.kind,
     label: field.label,
     value: values[field.key],
+    field,
   }));
 
   const knownKeys = new Set(documentType.fields.map((field) => field.key));
@@ -262,6 +278,7 @@ function getEditableDocumentEntries(
       kind: "text" as const,
       label: key,
       value,
+      field: null,
     }));
 
   return [...definedEntries, ...extraEntries];
@@ -270,31 +287,24 @@ function getEditableDocumentEntries(
 function buildDraftForDocument(
   document: DocumentRecord,
   documentTypeById: Map<string, DocumentType>,
-): Record<string, string> {
+): ExtractedRecord {
   return Object.fromEntries(
     getEditableDocumentEntries(document, documentTypeById).map((entry) => [
       entry.key,
-      formatEditableValue(entry.value),
+      cloneExtractedValue(entry.value),
     ]),
   );
 }
 
 function hasDraftChanges(
   document: DocumentRecord,
-  draft: Record<string, string> | undefined,
+  draft: ExtractedRecord | undefined,
   documentTypeById: Map<string, DocumentType>,
 ): boolean {
   const baseDraft = buildDraftForDocument(document, documentTypeById);
   const nextDraft = draft ?? baseDraft;
-  const keys = new Set([...Object.keys(baseDraft), ...Object.keys(nextDraft)]);
 
-  for (const key of keys) {
-    if ((baseDraft[key] ?? "") !== (nextDraft[key] ?? "")) {
-      return true;
-    }
-  }
-
-  return false;
+  return JSON.stringify(baseDraft) !== JSON.stringify(nextDraft);
 }
 
 function getRowsForValue(value: string): number {
@@ -315,6 +325,38 @@ function truncateFileName(value: string, maxLength: number): string {
   }
 
   return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function cloneExtractedValue(value: ExtractedValue | undefined): ExtractedValue {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  return JSON.parse(JSON.stringify(value)) as ExtractedValue;
+}
+
+function getTextRowsForValue(value: ExtractedValue | undefined): number {
+  return getRowsForValue(formatEditableValue(value));
+}
+
+function isRecordValue(value: ExtractedValue): value is Record<string, ExtractedValue> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getProductsRows(value: ExtractedValue | undefined): Record<string, ExtractedValue>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecordValue);
+}
+
+function buildEmptyProductRow(field: ProductsFieldDefinition): Record<string, ExtractedValue> {
+  return Object.fromEntries(field.columns.map((column) => [column.key, null]));
 }
 
 export function DocumentsWorkbench({
@@ -340,7 +382,7 @@ export function DocumentsWorkbench({
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<string[]>([]);
-  const [reviewDrafts, setReviewDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, ExtractedRecord>>({});
   const [splitRatios, setSplitRatios] = useState<Record<string, number>>({});
   const [viewerStates, setViewerStates] = useState<Record<string, ViewerState>>({});
   const [activeSplitDrag, setActiveSplitDrag] = useState<SplitDragState | null>(null);
@@ -1003,7 +1045,11 @@ export function DocumentsWorkbench({
     });
   }
 
-  function handleReviewFieldChange(document: DocumentRecord, key: string, value: string) {
+  function handleReviewFieldChange(
+    document: DocumentRecord,
+    key: string,
+    value: ExtractedValue,
+  ) {
     setReviewDrafts((current) => {
       const existing = current[document.id] ?? buildDraftForDocument(document, documentTypeById);
 
@@ -1012,6 +1058,67 @@ export function DocumentsWorkbench({
         [document.id]: {
           ...existing,
           [key]: value,
+        },
+      };
+    });
+  }
+
+  function handleProductCellChange(
+    document: DocumentRecord,
+    field: ProductsFieldDefinition,
+    rowIndex: number,
+    column: ProductColumnDefinition,
+    value: string,
+  ) {
+    setReviewDrafts((current) => {
+      const existing = current[document.id] ?? buildDraftForDocument(document, documentTypeById);
+      const rows = getProductsRows(existing[field.key]).map((row) => ({ ...row }));
+      const nextRow = rows[rowIndex] ?? buildEmptyProductRow(field);
+
+      rows[rowIndex] = {
+        ...nextRow,
+        [column.key]: value,
+      };
+
+      return {
+        ...current,
+        [document.id]: {
+          ...existing,
+          [field.key]: rows,
+        },
+      };
+    });
+  }
+
+  function handleAddProductRow(document: DocumentRecord, field: ProductsFieldDefinition) {
+    setReviewDrafts((current) => {
+      const existing = current[document.id] ?? buildDraftForDocument(document, documentTypeById);
+      const rows = getProductsRows(existing[field.key]).map((row) => ({ ...row }));
+
+      return {
+        ...current,
+        [document.id]: {
+          ...existing,
+          [field.key]: [...rows, buildEmptyProductRow(field)],
+        },
+      };
+    });
+  }
+
+  function handleRemoveProductRow(
+    document: DocumentRecord,
+    field: ProductsFieldDefinition,
+    rowIndex: number,
+  ) {
+    setReviewDrafts((current) => {
+      const existing = current[document.id] ?? buildDraftForDocument(document, documentTypeById);
+      const rows = getProductsRows(existing[field.key]).filter((_, index) => index !== rowIndex);
+
+      return {
+        ...current,
+        [document.id]: {
+          ...existing,
+          [field.key]: rows,
         },
       };
     });
@@ -1602,6 +1709,15 @@ export function DocumentsWorkbench({
                       {orderedEntries.length > 0 && !isExpanded ? (
                         <p className="mt-3 text-sm text-[var(--muted)]">
                           {orderedEntries.length} extracted field{orderedEntries.length === 1 ? "" : "s"} ready for review.
+                          {editableEntries
+                            .filter((entry) => entry.kind === "products")
+                            .map((entry) => getProductsRows(draft[entry.key]).length)
+                            .reduce((sum, count) => sum + count, 0) > 0
+                            ? ` ${editableEntries
+                                .filter((entry) => entry.kind === "products")
+                                .map((entry) => getProductsRows(draft[entry.key]).length)
+                                .reduce((sum, count) => sum + count, 0)} line items detected.`
+                            : ""}
                         </p>
                       ) : null}
                       {document.errorMessage ? (
@@ -1786,9 +1902,131 @@ export function DocumentsWorkbench({
                         ) : (
                           <div className="mt-4 space-y-4">
                             {editableEntries.map((entry) => {
-                              const currentValue = draft[entry.key] ?? "";
+                              const currentValue = draft[entry.key];
+                              const scalarValue = formatEditableValue(currentValue);
                               const isBoolean = entry.kind === "boolean";
-                              const isMultiline = entry.kind === "text" && getRowsForValue(currentValue) > 3;
+                              const isMultiline =
+                                entry.kind === "text" && getTextRowsForValue(currentValue) > 3;
+
+                              if (entry.kind === "products" && entry.field?.kind === "products") {
+                                const productsField = entry.field;
+                                const productRows = getProductsRows(currentValue);
+
+                                return (
+                                  <div
+                                    key={entry.key}
+                                    className="block border-b border-[color:var(--line)] pb-4 last:border-b-0 last:pb-0"
+                                  >
+                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                      <div>
+                                        <span className="font-medium text-[var(--ink)]">{entry.label}</span>
+                                        <p className="mt-1 text-sm text-[var(--muted)]">
+                                          Review each extracted line item as a separate row.
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-3">
+                                        <span className="data-label">{entry.key}</span>
+                                        <button
+                                          className="secondary-button px-3 py-2"
+                                          type="button"
+                                          onClick={() => handleAddProductRow(document, productsField)}
+                                        >
+                                          Add Row
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    <div className="mt-3 overflow-x-auto">
+                                      <table className="min-w-full border-collapse text-left">
+                                        <thead>
+                                          <tr className="border-b border-[color:var(--line)] text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
+                                            {productsField.columns.map((column) => (
+                                              <th key={column.key} className="px-3 py-2 font-medium">
+                                                {column.label}
+                                              </th>
+                                            ))}
+                                            <th className="px-3 py-2 font-medium">Actions</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {productRows.length === 0 ? (
+                                            <tr>
+                                              <td
+                                                className="px-3 py-4 text-sm text-[var(--muted)]"
+                                                colSpan={productsField.columns.length + 1}
+                                              >
+                                                No product rows yet.
+                                              </td>
+                                            </tr>
+                                          ) : null}
+                                          {productRows.map((row, rowIndex) => (
+                                            <tr
+                                              key={`${entry.key}-${rowIndex}`}
+                                              className="border-b border-[color:var(--line)] last:border-b-0"
+                                            >
+                                              {productsField.columns.map((column) => {
+                                                const columnValue = formatEditableValue(row[column.key]);
+
+                                                return (
+                                                  <td key={column.key} className="px-3 py-3 align-top">
+                                                    {column.kind === "boolean" ? (
+                                                      <select
+                                                        className="select-base min-w-[9rem]"
+                                                        value={columnValue}
+                                                        onChange={(event) =>
+                                                          handleProductCellChange(
+                                                            document,
+                                                            productsField,
+                                                            rowIndex,
+                                                            column,
+                                                            event.target.value,
+                                                          )
+                                                        }
+                                                      >
+                                                        <option value="">Blank</option>
+                                                        <option value="true">True</option>
+                                                        <option value="false">False</option>
+                                                      </select>
+                                                    ) : (
+                                                      <input
+                                                        className="input-base min-w-[10rem]"
+                                                        inputMode={
+                                                          column.kind === "currency" || column.kind === "number"
+                                                            ? "decimal"
+                                                            : undefined
+                                                        }
+                                                        value={columnValue}
+                                                        onChange={(event) =>
+                                                          handleProductCellChange(
+                                                            document,
+                                                            productsField,
+                                                            rowIndex,
+                                                            column,
+                                                            event.target.value,
+                                                          )
+                                                        }
+                                                      />
+                                                    )}
+                                                  </td>
+                                                );
+                                              })}
+                                              <td className="px-3 py-3 align-top">
+                                                <button
+                                                  className="danger-button"
+                                                  type="button"
+                                                  onClick={() => handleRemoveProductRow(document, productsField, rowIndex)}
+                                                >
+                                                  Remove
+                                                </button>
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                );
+                              }
 
                               return (
                                 <label
@@ -1803,7 +2041,7 @@ export function DocumentsWorkbench({
                                   {isBoolean ? (
                                     <select
                                       className="select-base mt-3"
-                                      value={currentValue}
+                                      value={scalarValue}
                                       onChange={(event) =>
                                         handleReviewFieldChange(document, entry.key, event.target.value)
                                       }
@@ -1815,8 +2053,8 @@ export function DocumentsWorkbench({
                                   ) : isMultiline ? (
                                     <textarea
                                       className="textarea-base mt-3"
-                                      rows={getRowsForValue(currentValue)}
-                                      value={currentValue}
+                                      rows={getTextRowsForValue(currentValue)}
+                                      value={scalarValue}
                                       onChange={(event) =>
                                         handleReviewFieldChange(document, entry.key, event.target.value)
                                       }
@@ -1829,7 +2067,7 @@ export function DocumentsWorkbench({
                                           ? "decimal"
                                           : undefined
                                       }
-                                      value={currentValue}
+                                      value={scalarValue}
                                       onChange={(event) =>
                                         handleReviewFieldChange(document, entry.key, event.target.value)
                                       }

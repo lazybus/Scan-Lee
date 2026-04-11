@@ -1,12 +1,14 @@
 import { z } from "zod";
 
-export const fieldKindValues = [
+export const scalarFieldKindValues = [
   "text",
   "number",
   "date",
   "currency",
   "boolean",
 ] as const;
+
+export const fieldKindValues = [...scalarFieldKindValues, "products"] as const;
 
 export const extractionStatusValues = [
   "uploaded",
@@ -17,18 +19,35 @@ export const extractionStatusValues = [
   "failed",
 ] as const;
 
-export const fieldDefinitionSchema = z.object({
+const baseFieldDefinitionSchema = z.object({
   key: z
     .string()
     .trim()
     .min(1)
     .regex(/^[a-z0-9_]+$/, "Use lowercase letters, numbers, and underscores only."),
   label: z.string().trim().min(1),
-  kind: z.enum(fieldKindValues),
   required: z.boolean().default(false),
   aliases: z.array(z.string().trim().min(1)).default([]),
   description: z.string().trim().default(""),
 });
+
+export const productColumnDefinitionSchema = baseFieldDefinitionSchema.extend({
+  kind: z.enum(scalarFieldKindValues),
+});
+
+const scalarFieldDefinitionSchema = baseFieldDefinitionSchema.extend({
+  kind: z.enum(scalarFieldKindValues),
+});
+
+const productsFieldDefinitionSchema = baseFieldDefinitionSchema.extend({
+  kind: z.literal("products"),
+  columns: z.array(productColumnDefinitionSchema).min(1, "Add at least one product column."),
+});
+
+export const fieldDefinitionSchema = z.union([
+  scalarFieldDefinitionSchema,
+  productsFieldDefinitionSchema,
+]);
 
 export const documentTypeInputSchema = z.object({
   name: z.string().trim().min(2),
@@ -48,14 +67,31 @@ export const documentTypeSchema = documentTypeInputSchema.extend({
   updatedAt: z.string(),
 });
 
-export const extractedValueSchema = z.union([
-  z.string(),
-  z.number(),
-  z.boolean(),
-  z.null(),
-]);
+export type ExtractedValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ExtractedValue[]
+  | { [key: string]: ExtractedValue };
 
-export const extractedRecordSchema = z.record(z.string(), extractedValueSchema);
+export type ExtractedRecord = Record<string, ExtractedValue>;
+
+export const extractedValueSchema: z.ZodType<ExtractedValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(extractedValueSchema),
+    z.record(z.string(), extractedValueSchema),
+  ]),
+);
+
+export const extractedRecordSchema: z.ZodType<ExtractedRecord> = z.record(
+  z.string(),
+  extractedValueSchema,
+);
 
 export const documentRecordSchema = z.object({
   id: z.string(),
@@ -76,11 +112,14 @@ export const documentRecordSchema = z.object({
 });
 
 export type FieldDefinition = z.infer<typeof fieldDefinitionSchema>;
+export type ProductColumnDefinition = z.infer<typeof productColumnDefinitionSchema>;
 export type DocumentTypeInput = z.infer<typeof documentTypeInputSchema>;
 export type DocumentType = z.infer<typeof documentTypeSchema>;
-export type ExtractedRecord = z.infer<typeof extractedRecordSchema>;
+export type ScalarFieldKind = (typeof scalarFieldKindValues)[number];
 export type ExtractionStatus = (typeof extractionStatusValues)[number];
 export type DocumentRecord = z.infer<typeof documentRecordSchema>;
+
+export type ProductsFieldDefinition = Extract<FieldDefinition, { kind: "products" }>;
 
 export function slugify(value: string): string {
   return value
@@ -103,45 +142,29 @@ export function normalizeExtractedData(
 ): ExtractedRecord {
   const normalizedEntries = fields.map((field) => {
     const rawValue = payload[field.key];
-    let normalizedValue: string | number | boolean | null = null;
+    let normalizedValue: ExtractedValue = null;
 
     if (rawValue === undefined || rawValue === null || rawValue === "") {
       return [field.key, null] as const;
     }
 
     switch (field.kind) {
+      case "products":
+        normalizedValue = normalizeProductsValue(field.columns, rawValue);
+        break;
       case "number":
       case "currency": {
-        const numberValue =
-          typeof rawValue === "number"
-            ? rawValue
-            : Number.parseFloat(String(rawValue).replace(/[^0-9.-]/g, ""));
-
-        normalizedValue = Number.isFinite(numberValue)
-          ? Number.parseFloat(numberValue.toFixed(2))
-          : null;
+        normalizedValue = normalizeScalarValue(field.kind, rawValue);
         break;
       }
       case "boolean": {
-        if (typeof rawValue === "boolean") {
-          normalizedValue = rawValue;
-          break;
-        }
-
-        const lowered = String(rawValue).trim().toLowerCase();
-        if (["true", "yes", "y", "1", "checked"].includes(lowered)) {
-          normalizedValue = true;
-        } else if (["false", "no", "n", "0", "unchecked"].includes(lowered)) {
-          normalizedValue = false;
-        } else {
-          normalizedValue = null;
-        }
+        normalizedValue = normalizeScalarValue(field.kind, rawValue);
         break;
       }
       case "date":
       case "text":
       default:
-        normalizedValue = String(rawValue).trim();
+        normalizedValue = normalizeScalarValue(field.kind, rawValue);
         break;
     }
 
@@ -157,7 +180,15 @@ export function getMissingRequiredFields(
 ): string[] {
   return fields
     .filter((field) => field.required)
-    .filter((field) => record[field.key] === null || record[field.key] === "")
+    .filter((field) => {
+      const value = record[field.key];
+
+      if (field.kind === "products") {
+        return !Array.isArray(value) || value.length === 0;
+      }
+
+      return value === null || value === "";
+    })
     .map((field) => field.key);
 }
 
@@ -167,7 +198,102 @@ export function buildFieldPromptSnippet(fields: FieldDefinition[]): string {
       const aliases = field.aliases.length > 0 ? ` aliases: ${field.aliases.join(", ")}.` : "";
       const detail = field.description ? ` ${field.description}` : "";
 
+      if (field.kind === "products") {
+        const columnSnippet = field.columns
+          .map((column) => {
+            const columnAliases =
+              column.aliases.length > 0 ? ` aliases: ${column.aliases.join(", ")}.` : "";
+            const columnDetail = column.description ? ` ${column.description}` : "";
+
+            return `${column.key} (${column.kind}, required: ${column.required})${columnAliases}${columnDetail}`;
+          })
+          .join("; ");
+
+        return `- ${field.key}: ${field.label} (products array). Required: ${field.required}.${aliases}${detail} Each array item must be one product row object with these keys: ${columnSnippet}. Return [] when no rows are present.`;
+      }
+
       return `- ${field.key}: ${field.label} (${field.kind}). Required: ${field.required}.${aliases}${detail}`;
     })
     .join("\n");
+}
+
+function normalizeScalarValue(kind: ScalarFieldKind, rawValue: unknown): ExtractedValue {
+  switch (kind) {
+    case "number":
+    case "currency": {
+      const numberValue =
+        typeof rawValue === "number"
+          ? rawValue
+          : Number.parseFloat(String(rawValue).replace(/[^0-9.-]/g, ""));
+
+      return Number.isFinite(numberValue)
+        ? Number.parseFloat(numberValue.toFixed(2))
+        : null;
+    }
+    case "boolean": {
+      if (typeof rawValue === "boolean") {
+        return rawValue;
+      }
+
+      const lowered = String(rawValue).trim().toLowerCase();
+      if (["true", "yes", "y", "1", "checked"].includes(lowered)) {
+        return true;
+      }
+
+      if (["false", "no", "n", "0", "unchecked"].includes(lowered)) {
+        return false;
+      }
+
+      return null;
+    }
+    case "date":
+    case "text":
+    default:
+      return String(rawValue).trim();
+  }
+}
+
+function normalizeProductsValue(
+  columns: ProductColumnDefinition[],
+  rawValue: unknown,
+): ExtractedValue {
+  const productRows = coerceProductRows(rawValue);
+
+  if (!productRows) {
+    return null;
+  }
+
+  const normalizedRows = productRows
+    .map((row) =>
+      Object.fromEntries(
+        columns.map((column) => [
+          column.key,
+          normalizeScalarValue(column.kind, row[column.key]),
+        ]),
+      ),
+    )
+    .filter((row) => Object.values(row).some((value) => value !== null && value !== ""));
+
+  return normalizedRows;
+}
+
+function coerceProductRows(rawValue: unknown): Record<string, unknown>[] | null {
+  if (Array.isArray(rawValue)) {
+    return rawValue.filter(isRecordLike);
+  }
+
+  if (typeof rawValue !== "string") {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown;
+    return Array.isArray(parsed) ? parsed.filter(isRecordLike) : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

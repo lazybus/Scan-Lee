@@ -6,10 +6,22 @@ import { useRouter } from "next/navigation";
 import {
   fieldKindValues,
   normalizeFieldKey,
+  scalarFieldKindValues,
   slugify,
   type DocumentType,
   type FieldDefinition,
+  type ProductColumnDefinition,
 } from "@/lib/domain";
+
+type ProductColumnDraft = {
+  id: string;
+  key: string;
+  label: string;
+  kind: ProductColumnDefinition["kind"];
+  required: boolean;
+  aliases: string;
+  description: string;
+};
 
 type FieldDraft = {
   id: string;
@@ -19,10 +31,37 @@ type FieldDraft = {
   required: boolean;
   aliases: string;
   description: string;
+  columns: ProductColumnDraft[];
 };
 
 const defaultPrompt =
   "Extract this document into one JSON object only. Use the configured keys exactly. If a field is not visible or not legible, return null rather than guessing.";
+
+function buildProductColumnDraft(): ProductColumnDraft {
+  return {
+    id: crypto.randomUUID(),
+    key: "",
+    label: "",
+    kind: "text",
+    required: false,
+    aliases: "",
+    description: "",
+  };
+}
+
+function buildProductColumnDraftFromDefinition(
+  column: ProductColumnDefinition,
+): ProductColumnDraft {
+  return {
+    id: crypto.randomUUID(),
+    key: column.key,
+    label: column.label,
+    kind: column.kind,
+    required: column.required,
+    aliases: column.aliases.join(", "),
+    description: column.description,
+  };
+}
 
 function buildFieldDraft(): FieldDraft {
   return {
@@ -33,6 +72,7 @@ function buildFieldDraft(): FieldDraft {
     required: false,
     aliases: "",
     description: "",
+    columns: [buildProductColumnDraft()],
   };
 }
 
@@ -45,6 +85,10 @@ function buildFieldDraftFromDefinition(field: FieldDefinition): FieldDraft {
     required: field.required,
     aliases: field.aliases.join(", "),
     description: field.description,
+    columns:
+      field.kind === "products"
+        ? field.columns.map(buildProductColumnDraftFromDefinition)
+        : [buildProductColumnDraft()],
   };
 }
 
@@ -90,6 +134,51 @@ export function DocumentTypesManager({
 
   function removeField(id: string) {
     setFields((currentFields) => currentFields.filter((field) => field.id !== id));
+  }
+
+  function updateProductColumn(
+    fieldId: string,
+    columnId: string,
+    patch: Partial<ProductColumnDraft>,
+  ) {
+    setFields((currentFields) =>
+      currentFields.map((field) =>
+        field.id === fieldId
+          ? {
+              ...field,
+              columns: field.columns.map((column) =>
+                column.id === columnId ? { ...column, ...patch } : column,
+              ),
+            }
+          : field,
+      ),
+    );
+  }
+
+  function addProductColumn(fieldId: string) {
+    setFields((currentFields) =>
+      currentFields.map((field) =>
+        field.id === fieldId
+          ? { ...field, columns: [...field.columns, buildProductColumnDraft()] }
+          : field,
+      ),
+    );
+  }
+
+  function removeProductColumn(fieldId: string, columnId: string) {
+    setFields((currentFields) =>
+      currentFields.map((field) =>
+        field.id === fieldId
+          ? {
+              ...field,
+              columns:
+                field.columns.length > 1
+                  ? field.columns.filter((column) => column.id !== columnId)
+                  : field.columns,
+            }
+          : field,
+      ),
+    );
   }
 
   function moveField(fieldId: string, targetFieldId: string) {
@@ -172,6 +261,21 @@ export function DocumentTypesManager({
           .map((value) => value.trim())
           .filter(Boolean),
         description: field.description,
+        ...(field.kind === "products"
+          ? {
+              columns: field.columns.map((column) => ({
+                key: normalizeFieldKey(column.key),
+                label: column.label,
+                kind: column.kind,
+                required: column.required,
+                aliases: column.aliases
+                  .split(",")
+                  .map((value) => value.trim())
+                  .filter(Boolean),
+                description: column.description,
+              })),
+            }
+          : {}),
       })),
     };
 
@@ -465,6 +569,10 @@ export function DocumentTypesManager({
                       onChange={(event) =>
                         updateField(field.id, {
                           kind: event.target.value as FieldDefinition["kind"],
+                          columns:
+                            event.target.value === "products" && field.columns.length === 0
+                              ? [buildProductColumnDraft()]
+                              : field.columns,
                         })
                       }
                     >
@@ -509,6 +617,141 @@ export function DocumentTypesManager({
                     placeholder="How the value should be interpreted by the model."
                   />
                 </label>
+
+                {field.kind === "products" ? (
+                  <div className="space-y-4 border-t border-[color:var(--line)] pt-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="data-label">Product Columns</p>
+                        <p className="mt-1 text-sm text-[var(--muted)]">
+                          Define one row schema for repeating line items.
+                        </p>
+                      </div>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => addProductColumn(field.id)}
+                      >
+                        Add Column
+                      </button>
+                    </div>
+
+                    {field.columns.map((column, columnIndex) => (
+                      <div
+                        key={column.id}
+                        className="space-y-3 border border-[color:var(--line)] bg-[var(--panel)] p-4"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-medium uppercase tracking-[0.14em]">
+                            Column {columnIndex + 1}
+                          </p>
+                          {field.columns.length > 1 ? (
+                            <button
+                              className="danger-button"
+                              type="button"
+                              onClick={() => removeProductColumn(field.id, column.id)}
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block space-y-2">
+                            <span className="data-label">Column Key</span>
+                            <input
+                              className="input-base font-mono"
+                              value={column.key}
+                              onChange={(event) =>
+                                updateProductColumn(field.id, column.id, {
+                                  key: normalizeFieldKey(event.target.value),
+                                })
+                              }
+                              placeholder="sku"
+                            />
+                          </label>
+                          <label className="block space-y-2">
+                            <span className="data-label">Column Label</span>
+                            <input
+                              className="input-base"
+                              value={column.label}
+                              onChange={(event) =>
+                                updateProductColumn(field.id, column.id, {
+                                  label: event.target.value,
+                                })
+                              }
+                              placeholder="SKU"
+                            />
+                          </label>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block space-y-2">
+                            <span className="data-label">Column Kind</span>
+                            <select
+                              className="select-base"
+                              value={column.kind}
+                              onChange={(event) =>
+                                updateProductColumn(field.id, column.id, {
+                                  kind: event.target.value as ProductColumnDefinition["kind"],
+                                })
+                              }
+                            >
+                              {scalarFieldKindValues.map((value) => (
+                                <option key={value} value={value}>
+                                  {value}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="schema-toggle">
+                            <input
+                              className="h-4 w-4 accent-[var(--accent)]"
+                              checked={column.required}
+                              onChange={(event) =>
+                                updateProductColumn(field.id, column.id, {
+                                  required: event.target.checked,
+                                })
+                              }
+                              type="checkbox"
+                            />
+                            <span className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--ink)]">
+                              Required column
+                            </span>
+                          </label>
+                        </div>
+
+                        <label className="block space-y-2">
+                          <span className="data-label">Column Aliases</span>
+                          <input
+                            className="input-base"
+                            value={column.aliases}
+                            onChange={(event) =>
+                              updateProductColumn(field.id, column.id, {
+                                aliases: event.target.value,
+                              })
+                            }
+                            placeholder="item code, stock code"
+                          />
+                        </label>
+
+                        <label className="block space-y-2">
+                          <span className="data-label">Column Description</span>
+                          <textarea
+                            className="textarea-base"
+                            value={column.description}
+                            onChange={(event) =>
+                              updateProductColumn(field.id, column.id, {
+                                description: event.target.value,
+                              })
+                            }
+                            placeholder="How this column should be interpreted in each row."
+                          />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

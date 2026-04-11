@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { getDocumentTypeById } from "@/lib/document-types";
-import { normalizeExtractedData } from "@/lib/domain";
+import { extractedRecordSchema, normalizeExtractedData, type ExtractedRecord } from "@/lib/domain";
 import { deleteDocument, getDocumentById, updateDocumentReview } from "@/lib/documents";
 import { deleteStoredFile } from "@/lib/storage";
 
@@ -9,12 +9,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const reviewRequestSchema = z.object({
-  reviewedData: z.record(z.string(), z.union([z.string(), z.null()])),
+  reviewedData: extractedRecordSchema,
   status: z.enum(["reviewed", "completed"]).optional(),
 });
 
 function normalizeReviewedData(
-  values: Record<string, string | null>,
+  values: ExtractedRecord,
   documentTypeId: string,
 ) {
   const documentType = getDocumentTypeById(documentTypeId);
@@ -27,7 +27,7 @@ function normalizeReviewedData(
   const knownKeys = new Set(documentType.fields.map((field) => field.key));
   const extraEntries = Object.entries(values)
     .filter(([key]) => !knownKeys.has(key))
-    .map(([key, value]) => [key, value === null ? null : value.trim() || null] as const);
+    .map(([key, value]) => [key, value] as const);
 
   return {
     ...normalizedData,

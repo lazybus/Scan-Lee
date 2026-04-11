@@ -1,9 +1,11 @@
 import { getDatabase } from "@/lib/db";
+import { getDocumentTypeById } from "@/lib/document-types";
 import {
   documentRecordSchema,
   extractedRecordSchema,
   type DocumentRecord,
   type ExtractedRecord,
+  type ExtractedValue,
 } from "@/lib/domain";
 import type { StoredFile } from "@/lib/storage";
 
@@ -266,16 +268,91 @@ export function getExportRows(documentTypeId?: string) {
 
   return documents
     .filter((document) => document.extractedData || document.reviewedData)
-    .map((document) => {
+    .flatMap((document) => {
       const values = document.reviewedData ?? document.extractedData ?? {};
-
-      return {
+      const documentType = getDocumentTypeById(document.documentTypeId);
+      const baseRow = {
         documentId: document.id,
         documentType: document.documentTypeName,
         fileName: document.originalName,
         status: document.status,
         capturedAt: document.createdAt,
-        ...values,
       };
+
+      if (!documentType) {
+        return [
+          {
+            ...baseRow,
+            ...flattenRecordValues(values),
+          },
+        ];
+      }
+
+      const productFields = documentType.fields.filter((field) => field.kind === "products");
+
+      if (productFields.length === 0) {
+        return [
+          {
+            ...baseRow,
+            ...flattenRecordValues(values),
+          },
+        ];
+      }
+
+      const scalarValues = Object.fromEntries(
+        Object.entries(values).filter(
+          ([key]) => !productFields.some((field) => field.key === key),
+        ),
+      );
+      const flattenedScalarValues = flattenRecordValues(scalarValues);
+      const productRows = productFields.flatMap((field) => {
+        const rows = getArrayRecordValues(values[field.key]);
+
+        return rows.map((row) => ({
+          ...baseRow,
+          ...flattenedScalarValues,
+          productsField: field.key,
+          ...flattenRecordValues(row),
+        }));
+      });
+
+      return productRows.length > 0
+        ? productRows
+        : [
+            {
+              ...baseRow,
+              ...flattenedScalarValues,
+            },
+          ];
     });
+}
+
+function flattenRecordValues(values: Record<string, ExtractedValue>) {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, flattenExportValue(value)]),
+  );
+}
+
+function flattenExportValue(value: ExtractedValue): string | number | boolean | null {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  return JSON.stringify(value);
+}
+
+function getArrayRecordValues(value: ExtractedValue | undefined): Record<string, ExtractedValue>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (item): item is Record<string, ExtractedValue> =>
+      typeof item === "object" && item !== null && !Array.isArray(item),
+  );
 }

@@ -4,6 +4,7 @@ import {
   normalizeExtractedData,
   type DocumentType,
   type ExtractedRecord,
+  type ProductsFieldDefinition,
 } from "@/lib/domain";
 import { readStoredFileAsBase64 } from "@/lib/storage";
 
@@ -48,6 +49,27 @@ function buildPrompt(documentType: DocumentType): string {
     "Do not wrap the JSON in markdown.",
     "Use these exact keys and set missing values to null.",
     buildFieldPromptSnippet(documentType.fields),
+  ].join("\n\n");
+}
+
+function buildProductsFallbackPrompt(field: ProductsFieldDefinition): string {
+  const columnSnippet = field.columns
+    .map((column) => {
+      const aliases = column.aliases.length > 0 ? ` aliases: ${column.aliases.join(", ")}.` : "";
+      const detail = column.description ? ` ${column.description}` : "";
+
+      return `- ${column.key}: ${column.label} (${column.kind}). Required: ${column.required}.${aliases}${detail}`;
+    })
+    .join("\n");
+
+  return [
+    `Extract only the ${field.label} field from this document image.`,
+    "Return one JSON object only.",
+    "Do not wrap the JSON in markdown.",
+    `Return this exact shape: {"${field.key}": []} when no rows are present.`,
+    `Each item in ${field.key} must be one complete row object from the repeating table.`,
+    "Use the exact keys below for every row object:",
+    columnSnippet,
   ].join("\n\n");
 }
 
@@ -115,6 +137,72 @@ export async function extractDocumentWithOllama(input: {
     ].join("\n"),
   ); */
 
+  const rawResponse = await requestOllamaJsonResponse({
+    imageBase64,
+    systemPrompt,
+    userPrompt,
+  });
+
+  console.info(
+    [
+      "[ollama] Extraction response",
+      `model=${modelName}`,
+      "json >>>",
+      rawResponse,
+      "<<< json",
+    ].join("\n"),
+  );
+
+  const parsed = parseOllamaJsonObject(rawResponse);
+  const fallbackResponses: Record<string, unknown> = {};
+
+  for (const field of input.documentType.fields) {
+    if (field.kind !== "products") {
+      continue;
+    }
+
+    if (!needsProductsFallback(parsed[field.key])) {
+      continue;
+    }
+
+    const fallbackResponse = await requestOllamaJsonResponse({
+      imageBase64,
+      systemPrompt,
+      userPrompt: buildProductsFallbackPrompt(field),
+    });
+    const fallbackParsed = parseOllamaJsonObject(fallbackResponse);
+
+    if (Array.isArray(fallbackParsed[field.key])) {
+      parsed[field.key] = fallbackParsed[field.key];
+      fallbackResponses[field.key] = fallbackParsed[field.key];
+    }
+  }
+
+  const extractedData = normalizeExtractedData(input.documentType.fields, parsed);
+
+  return {
+    extractedData,
+    rawResponse:
+      Object.keys(fallbackResponses).length === 0
+        ? rawResponse
+        : JSON.stringify(
+            {
+              primary: parsed,
+              fallback: fallbackResponses,
+            },
+            null,
+            2,
+          ),
+    modelName,
+    missingRequiredFields: getMissingRequiredFields(input.documentType.fields, extractedData),
+  };
+}
+
+async function requestOllamaJsonResponse(input: {
+  imageBase64: string;
+  systemPrompt: string;
+  userPrompt: string;
+}) {
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: {
@@ -128,12 +216,12 @@ export async function extractDocumentWithOllama(input: {
       messages: [
         {
           role: "system",
-          content: systemPrompt,
+          content: input.systemPrompt,
         },
         {
           role: "user",
-          content: userPrompt,
-          images: [imageBase64],
+          content: input.userPrompt,
+          images: [input.imageBase64],
         },
       ],
       options: {
@@ -160,22 +248,20 @@ export async function extractDocumentWithOllama(input: {
     );
   }
 
-  console.info(
-    [
-      "[ollama] Extraction response",
-      `model=${modelName}`,
-      "json >>>",
-      rawResponse,
-      "<<< json",
-    ].join("\n"),
-  );
+  return rawResponse;
+}
 
+function parseOllamaJsonObject(rawResponse: string) {
   const sanitizedResponse = stripJsonCodeFence(rawResponse);
 
-  let parsed: Record<string, unknown>;
-
   try {
-    parsed = JSON.parse(sanitizedResponse) as Record<string, unknown>;
+    const parsed = JSON.parse(sanitizedResponse) as unknown;
+
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      throw new Error("Top-level JSON must be an object.");
+    }
+
+    return parsed as Record<string, unknown>;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown JSON parse error.";
     throw new OllamaExtractionError(
@@ -183,13 +269,24 @@ export async function extractDocumentWithOllama(input: {
       rawResponse,
     );
   }
+}
 
-  const extractedData = normalizeExtractedData(input.documentType.fields, parsed);
+function needsProductsFallback(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return true;
+  }
 
-  return {
-    extractedData,
-    rawResponse,
-    modelName,
-    missingRequiredFields: getMissingRequiredFields(input.documentType.fields, extractedData),
-  };
+  if (Array.isArray(value)) {
+    return false;
+  }
+
+  if (typeof value !== "string") {
+    return true;
+  }
+
+  try {
+    return !Array.isArray(JSON.parse(value));
+  } catch {
+    return true;
+  }
 }
