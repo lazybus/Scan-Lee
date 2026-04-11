@@ -658,6 +658,18 @@ a {
   min-width: 0;
 }
 
+.document-review-preview-sheet {
+  position: relative;
+}
+
+.document-review-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transform: translateY(var(--preview-offset, 0px));
+  will-change: transform;
+}
+
 .document-review-resizer {
   position: relative;
   min-height: 100%;
@@ -677,7 +689,8 @@ a {
 .document-image-stage {
   position: relative;
   overflow: hidden;
-  height: clamp(18rem, 42vh, 28rem);
+  min-height: 18rem;
+  height: min(32rem, calc(100dvh - 8rem));
   border: 2px solid color-mix(in srgb, var(--ink) 24%, transparent 76%);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--canvas) 72%, black 28%) 0%, var(--field-surface) 100%);

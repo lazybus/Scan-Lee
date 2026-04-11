@@ -48,7 +48,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitializationScript }} />
       </head>
       <body className="min-h-full bg-[var(--canvas)] text-[var(--ink)]">
-        <div className="relative min-h-screen overflow-hidden">
+        <div className="relative min-h-screen overflow-x-hidden">
           <div className="app-backdrop pointer-events-none absolute inset-0" />
           <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 pb-10 pt-5 sm:px-8 lg:px-10">
             <header className="relative border-[3px] border-[var(--ink)] bg-[var(--header-surface)] shadow-[8px_8px_0_var(--accent-strong)] backdrop-blur">

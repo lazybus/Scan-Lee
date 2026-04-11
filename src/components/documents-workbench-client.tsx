@@ -98,6 +98,9 @@ type SelectedUploadItem = {
 };
 
 const defaultSplitRatio = 46;
+const previewScrollTopOffset = 16;
+const previewScrollBottomInset = 16;
+
 const defaultViewerState: ViewerState = {
   zoom: 1,
   x: 0,
@@ -371,6 +374,8 @@ export function DocumentsWorkbench({
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
   const selectedFilesRef = useRef<SelectedUploadItem[]>([]);
   const splitContainerRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const previewSheetRefs = useRef<Record<string, HTMLElement | null>>({});
+  const previewRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const imageWheelCleanupRefs = useRef<Record<string, (() => void) | undefined>>({});
   const [documentTypeId, setDocumentTypeId] = useState(initialDocumentTypes[0]?.id ?? "");
   const [documents, setDocuments] = useState(initialDocuments);
@@ -564,6 +569,65 @@ export function DocumentsWorkbench({
       revokeUploadItems(selectedFilesRef.current);
     };
   }, []);
+
+  const updatePreviewOffsets = useEffectEvent(() => {
+    const isDesktop = window.innerWidth > 820;
+
+    for (const documentId of expandedDocumentIds) {
+      const previewSheet = previewSheetRefs.current[documentId];
+      const preview = previewRefs.current[documentId];
+
+      if (!previewSheet || !preview) {
+        continue;
+      }
+
+      if (!isDesktop) {
+        preview.style.setProperty("--preview-offset", "0px");
+        continue;
+      }
+
+      const sheetRect = previewSheet.getBoundingClientRect();
+      const maxOffset = Math.max(
+        0,
+        previewSheet.clientHeight - preview.offsetHeight - previewScrollBottomInset,
+      );
+      const nextOffset = clamp(previewScrollTopOffset - sheetRect.top, 0, maxOffset);
+
+      preview.style.setProperty("--preview-offset", `${nextOffset}px`);
+    }
+  });
+
+  useEffect(() => {
+    if (expandedDocumentIds.length === 0) {
+      return;
+    }
+
+    let frameId = 0;
+
+    const scheduleUpdate = () => {
+      if (frameId !== 0) {
+        return;
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0;
+        updatePreviewOffsets();
+      });
+    };
+
+    scheduleUpdate();
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+
+    return () => {
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+    };
+  }, [expandedDocumentIds, splitRatios, documents]);
 
   function clearDocumentTransientState(id: string) {
     setReviewDrafts((current) => {
@@ -1761,65 +1825,77 @@ export function DocumentsWorkbench({
                       className="document-review-split"
                       style={{ ["--split-left" as string]: `${splitRatio}%` }}
                     >
-                      <section className="record-sheet p-4">
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                          <p className="data-label">Source Image</p>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <button
-                              aria-label="Zoom out"
-                              className="viewer-icon-button"
-                              onClick={() => setViewerZoom(document.id, viewer.zoom - 0.25)}
-                              title="Zoom out"
-                              type="button"
-                            >
-                              <FontAwesomeIcon icon={faMagnifyingGlassMinus} />
-                            </button>
-                            <button
-                              aria-label="Zoom in"
-                              className="viewer-icon-button"
-                              onClick={() => setViewerZoom(document.id, viewer.zoom + 0.25)}
-                              title="Zoom in"
-                              type="button"
-                            >
-                              <FontAwesomeIcon icon={faMagnifyingGlassPlus} />
-                            </button>
-                            <button
-                              aria-label="Reset view"
-                              className="viewer-icon-button"
-                              onClick={() =>
-                                setViewerStates((current) => ({
-                                  ...current,
-                                  [document.id]: defaultViewerState,
-                                }))
-                              }
-                              title="Reset view"
-                              type="button"
-                            >
-                              <FontAwesomeIcon icon={faArrowsRotate} />
-                            </button>
-                          </div>
-                        </div>
-
+                      <section
+                        className="record-sheet document-review-preview-sheet p-4"
+                        ref={(node) => {
+                          previewSheetRefs.current[document.id] = node;
+                        }}
+                      >
                         <div
-                          className="document-image-stage mt-4"
-                          data-can-pan={viewer.zoom > 1 ? "true" : "false"}
-                          data-panning={
-                            activeImagePan?.documentId === document.id && viewer.zoom > 1 ? "true" : "false"
-                          }
-                          ref={(node) => bindImageWheel(document.id, node)}
-                          onPointerDown={(event) => handleImagePointerDown(document.id, event)}
+                          className="document-review-preview"
+                          ref={(node) => {
+                            previewRefs.current[document.id] = node;
+                          }}
                         >
-                          <Image
-                            fill
-                            alt={`Stored source for ${document.originalName}`}
-                            className="document-image-asset"
-                            draggable={false}
-                            src={`/api/documents/${document.id}/file`}
-                            unoptimized
-                            style={{
-                              transform: `translate(${viewer.x}px, ${viewer.y}px) scale(${viewer.zoom})`,
-                            }}
-                          />
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                            <p className="data-label">Source Image</p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                aria-label="Zoom out"
+                                className="viewer-icon-button"
+                                onClick={() => setViewerZoom(document.id, viewer.zoom - 0.25)}
+                                title="Zoom out"
+                                type="button"
+                              >
+                                <FontAwesomeIcon icon={faMagnifyingGlassMinus} />
+                              </button>
+                              <button
+                                aria-label="Zoom in"
+                                className="viewer-icon-button"
+                                onClick={() => setViewerZoom(document.id, viewer.zoom + 0.25)}
+                                title="Zoom in"
+                                type="button"
+                              >
+                                <FontAwesomeIcon icon={faMagnifyingGlassPlus} />
+                              </button>
+                              <button
+                                aria-label="Reset view"
+                                className="viewer-icon-button"
+                                onClick={() =>
+                                  setViewerStates((current) => ({
+                                    ...current,
+                                    [document.id]: defaultViewerState,
+                                  }))
+                                }
+                                title="Reset view"
+                                type="button"
+                              >
+                                <FontAwesomeIcon icon={faArrowsRotate} />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div
+                            className="document-image-stage"
+                            data-can-pan={viewer.zoom > 1 ? "true" : "false"}
+                            data-panning={
+                              activeImagePan?.documentId === document.id && viewer.zoom > 1 ? "true" : "false"
+                            }
+                            ref={(node) => bindImageWheel(document.id, node)}
+                            onPointerDown={(event) => handleImagePointerDown(document.id, event)}
+                          >
+                            <Image
+                              fill
+                              alt={`Stored source for ${document.originalName}`}
+                              className="document-image-asset"
+                              draggable={false}
+                              src={`/api/documents/${document.id}/file`}
+                              unoptimized
+                              style={{
+                                transform: `translate(${viewer.x}px, ${viewer.y}px) scale(${viewer.zoom})`,
+                              }}
+                            />
+                          </div>
                         </div>
                       </section>
 

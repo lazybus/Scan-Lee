@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["cory-pc"],
   serverExternalPackages: ["better-sqlite3"],
 };
 
