@@ -288,7 +288,7 @@ export function getExportRows(documentTypeId?: string) {
         ];
       }
 
-      const productFields = documentType.fields.filter((field) => field.kind === "products");
+      const productFields = documentType.fields.filter((field) => field.kind === "table");
 
       if (productFields.length === 0) {
         return [

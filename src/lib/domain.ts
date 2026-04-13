@@ -8,7 +8,7 @@ export const scalarFieldKindValues = [
   "boolean",
 ] as const;
 
-export const fieldKindValues = [...scalarFieldKindValues, "products"] as const;
+export const fieldKindValues = [...scalarFieldKindValues, "table"] as const;
 
 export const extractionStatusValues = [
   "uploaded",
@@ -39,14 +39,19 @@ const scalarFieldDefinitionSchema = baseFieldDefinitionSchema.extend({
   kind: z.enum(scalarFieldKindValues),
 });
 
-const productsFieldDefinitionSchema = baseFieldDefinitionSchema.extend({
-  kind: z.literal("products"),
-  columns: z.array(productColumnDefinitionSchema).min(1, "Add at least one product column."),
-});
+const tableFieldDefinitionSchema = baseFieldDefinitionSchema
+  .extend({
+    kind: z.union([z.literal("table"), z.literal("products")]),
+    columns: z.array(productColumnDefinitionSchema).min(1, "Add at least one table column."),
+  })
+  .transform((field) => ({
+    ...field,
+    kind: "table" as const,
+  }));
 
 export const fieldDefinitionSchema = z.union([
   scalarFieldDefinitionSchema,
-  productsFieldDefinitionSchema,
+  tableFieldDefinitionSchema,
 ]);
 
 export const documentTypeInputSchema = z.object({
@@ -119,7 +124,8 @@ export type ScalarFieldKind = (typeof scalarFieldKindValues)[number];
 export type ExtractionStatus = (typeof extractionStatusValues)[number];
 export type DocumentRecord = z.infer<typeof documentRecordSchema>;
 
-export type ProductsFieldDefinition = Extract<FieldDefinition, { kind: "products" }>;
+export type TableFieldDefinition = Extract<FieldDefinition, { kind: "table" }>;
+export type ProductsFieldDefinition = TableFieldDefinition;
 
 export function slugify(value: string): string {
   return value
@@ -149,7 +155,7 @@ export function normalizeExtractedData(
     }
 
     switch (field.kind) {
-      case "products":
+      case "table":
         normalizedValue = normalizeProductsValue(field.columns, rawValue);
         break;
       case "number":
@@ -183,7 +189,7 @@ export function getMissingRequiredFields(
     .filter((field) => {
       const value = record[field.key];
 
-      if (field.kind === "products") {
+      if (field.kind === "table") {
         return !Array.isArray(value) || value.length === 0;
       }
 
@@ -198,7 +204,7 @@ export function buildFieldPromptSnippet(fields: FieldDefinition[]): string {
       const aliases = field.aliases.length > 0 ? ` aliases: ${field.aliases.join(", ")}.` : "";
       const detail = field.description ? ` ${field.description}` : "";
 
-      if (field.kind === "products") {
+      if (field.kind === "table") {
         const columnSnippet = field.columns
           .map((column) => {
             const columnAliases =
@@ -209,7 +215,7 @@ export function buildFieldPromptSnippet(fields: FieldDefinition[]): string {
           })
           .join("; ");
 
-        return `- ${field.key}: ${field.label} (products array). Required: ${field.required}.${aliases}${detail} Each array item must be one product row object with these keys: ${columnSnippet}. Return [] when no rows are present.`;
+        return `- ${field.key}: ${field.label} (table). Required: ${field.required}.${aliases}${detail} Each array item must be one table row object with these keys: ${columnSnippet}. Return [] when no rows are present.`;
       }
 
       return `- ${field.key}: ${field.label} (${field.kind}). Required: ${field.required}.${aliases}${detail}`;

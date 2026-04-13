@@ -4,7 +4,7 @@ import {
   normalizeExtractedData,
   type DocumentType,
   type ExtractedRecord,
-  type ProductsFieldDefinition,
+  type TableFieldDefinition,
 } from "@/lib/domain";
 import { readStoredFileAsBase64 } from "@/lib/storage";
 
@@ -52,7 +52,7 @@ function buildPrompt(documentType: DocumentType): string {
   ].join("\n\n");
 }
 
-function buildProductsFallbackPrompt(field: ProductsFieldDefinition): string {
+function buildProductsFallbackPrompt(field: TableFieldDefinition): string {
   const columnSnippet = field.columns
     .map((column) => {
       const aliases = column.aliases.length > 0 ? ` aliases: ${column.aliases.join(", ")}.` : "";
@@ -63,7 +63,7 @@ function buildProductsFallbackPrompt(field: ProductsFieldDefinition): string {
     .join("\n");
 
   return [
-    `Extract only the ${field.label} field from this document image.`,
+    `Extract only the ${field.label} table field from this document image.`,
     "Return one JSON object only.",
     "Do not wrap the JSON in markdown.",
     `Return this exact shape: {"${field.key}": []} when no rows are present.`,
@@ -157,7 +157,7 @@ export async function extractDocumentWithOllama(input: {
   const fallbackResponses: Record<string, unknown> = {};
 
   for (const field of input.documentType.fields) {
-    if (field.kind !== "products") {
+    if (field.kind !== "table") {
       continue;
     }
 

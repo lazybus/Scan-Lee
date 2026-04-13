@@ -33,7 +33,7 @@ import type {
   ExtractionStatus,
   FieldDefinition,
   ProductColumnDefinition,
-  ProductsFieldDefinition,
+  TableFieldDefinition,
 } from "@/lib/domain";
 
 type ExtractionResponse = {
@@ -358,7 +358,7 @@ function getProductsRows(value: ExtractedValue | undefined): Record<string, Extr
   return value.filter(isRecordValue);
 }
 
-function buildEmptyProductRow(field: ProductsFieldDefinition): Record<string, ExtractedValue> {
+function buildEmptyProductRow(field: TableFieldDefinition): Record<string, ExtractedValue> {
   return Object.fromEntries(field.columns.map((column) => [column.key, null]));
 }
 
@@ -1129,7 +1129,7 @@ export function DocumentsWorkbench({
 
   function handleProductCellChange(
     document: DocumentRecord,
-    field: ProductsFieldDefinition,
+    field: TableFieldDefinition,
     rowIndex: number,
     column: ProductColumnDefinition,
     value: string,
@@ -1154,7 +1154,7 @@ export function DocumentsWorkbench({
     });
   }
 
-  function handleAddProductRow(document: DocumentRecord, field: ProductsFieldDefinition) {
+  function handleAddProductRow(document: DocumentRecord, field: TableFieldDefinition) {
     setReviewDrafts((current) => {
       const existing = current[document.id] ?? buildDraftForDocument(document, documentTypeById);
       const rows = getProductsRows(existing[field.key]).map((row) => ({ ...row }));
@@ -1171,7 +1171,7 @@ export function DocumentsWorkbench({
 
   function handleRemoveProductRow(
     document: DocumentRecord,
-    field: ProductsFieldDefinition,
+    field: TableFieldDefinition,
     rowIndex: number,
   ) {
     setReviewDrafts((current) => {
@@ -1774,13 +1774,13 @@ export function DocumentsWorkbench({
                         <p className="mt-3 text-sm text-[var(--muted)]">
                           {orderedEntries.length} extracted field{orderedEntries.length === 1 ? "" : "s"} ready for review.
                           {editableEntries
-                            .filter((entry) => entry.kind === "products")
+                            .filter((entry) => entry.kind === "table")
                             .map((entry) => getProductsRows(draft[entry.key]).length)
                             .reduce((sum, count) => sum + count, 0) > 0
                             ? ` ${editableEntries
-                                .filter((entry) => entry.kind === "products")
+                                .filter((entry) => entry.kind === "table")
                                 .map((entry) => getProductsRows(draft[entry.key]).length)
-                                .reduce((sum, count) => sum + count, 0)} line items detected.`
+                                .reduce((sum, count) => sum + count, 0)} rows detected.`
                             : ""}
                         </p>
                       ) : null}
@@ -1984,7 +1984,7 @@ export function DocumentsWorkbench({
                               const isMultiline =
                                 entry.kind === "text" && getTextRowsForValue(currentValue) > 3;
 
-                              if (entry.kind === "products" && entry.field?.kind === "products") {
+                              if (entry.kind === "table" && entry.field?.kind === "table") {
                                 const productsField = entry.field;
                                 const productRows = getProductsRows(currentValue);
 
@@ -1997,7 +1997,7 @@ export function DocumentsWorkbench({
                                       <div>
                                         <span className="font-medium text-[var(--ink)]">{entry.label}</span>
                                         <p className="mt-1 text-sm text-[var(--muted)]">
-                                          Review each extracted line item as a separate row.
+                                          Review each extracted table row separately.
                                         </p>
                                       </div>
                                       <div className="flex items-center gap-3">
@@ -2031,7 +2031,7 @@ export function DocumentsWorkbench({
                                                 className="px-3 py-4 text-sm text-[var(--muted)]"
                                                 colSpan={productsField.columns.length + 1}
                                               >
-                                                No product rows yet.
+                                                No rows yet.
                                               </td>
                                             </tr>
                                           ) : null}

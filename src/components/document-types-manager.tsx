@@ -1,105 +1,50 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import {
+  faChevronDown,
+  faChevronUp,
+} from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import Link from "next/link";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import {
-  fieldKindValues,
-  normalizeFieldKey,
-  scalarFieldKindValues,
-  slugify,
   type DocumentType,
   type FieldDefinition,
-  type ProductColumnDefinition,
 } from "@/lib/domain";
 
-type ProductColumnDraft = {
-  id: string;
-  key: string;
-  label: string;
-  kind: ProductColumnDefinition["kind"];
-  required: boolean;
-  aliases: string;
-  description: string;
+type ReorderState = {
+  scope: string;
+  itemId: string;
 };
 
-type FieldDraft = {
-  id: string;
-  key: string;
-  label: string;
-  kind: FieldDefinition["kind"];
-  required: boolean;
-  aliases: string;
-  description: string;
-  columns: ProductColumnDraft[];
+type DragPreviewState = {
+  title: string;
+  subtitle: string;
+  x: number;
+  y: number;
 };
 
-const defaultPrompt =
-  "Extract this document into one JSON object only. Use the configured keys exactly. If a field is not visible or not legible, return null rather than guessing.";
+function moveListItem<T>(items: T[], sourceIndex: number, targetIndex: number) {
+  if (
+    sourceIndex < 0 ||
+    targetIndex < 0 ||
+    sourceIndex >= items.length ||
+    targetIndex >= items.length ||
+    sourceIndex === targetIndex
+  ) {
+    return items;
+  }
 
-function buildProductColumnDraft(): ProductColumnDraft {
-  return {
-    id: crypto.randomUUID(),
-    key: "",
-    label: "",
-    kind: "text",
-    required: false,
-    aliases: "",
-    description: "",
-  };
+  const nextItems = [...items];
+  const [movedItem] = nextItems.splice(sourceIndex, 1);
+  nextItems.splice(targetIndex, 0, movedItem);
+  return nextItems;
 }
 
-function buildProductColumnDraftFromDefinition(
-  column: ProductColumnDefinition,
-): ProductColumnDraft {
-  return {
-    id: crypto.randomUUID(),
-    key: column.key,
-    label: column.label,
-    kind: column.kind,
-    required: column.required,
-    aliases: column.aliases.join(", "),
-    description: column.description,
-  };
-}
-
-function buildFieldDraft(): FieldDraft {
-  return {
-    id: crypto.randomUUID(),
-    key: "",
-    label: "",
-    kind: "text",
-    required: false,
-    aliases: "",
-    description: "",
-    columns: [buildProductColumnDraft()],
-  };
-}
-
-function buildFieldDraftFromDefinition(field: FieldDefinition): FieldDraft {
-  return {
-    id: crypto.randomUUID(),
-    key: field.key,
-    label: field.label,
-    kind: field.kind,
-    required: field.required,
-    aliases: field.aliases.join(", "),
-    description: field.description,
-    columns:
-      field.kind === "products"
-        ? field.columns.map(buildProductColumnDraftFromDefinition)
-        : [buildProductColumnDraft()],
-  };
-}
-
-function applyDocumentTypeToForm(documentType: DocumentType) {
-  return {
-    name: documentType.name,
-    slug: documentType.slug,
-    description: documentType.description,
-    promptTemplate: documentType.promptTemplate,
-    fields: documentType.fields.map(buildFieldDraftFromDefinition),
-  };
+function buildSavedFieldScope(documentTypeId: string) {
+  return `saved:${documentTypeId}`;
 }
 
 export function DocumentTypesManager({
@@ -109,188 +54,178 @@ export function DocumentTypesManager({
 }) {
   const router = useRouter();
   const [documentTypes, setDocumentTypes] = useState(initialDocumentTypes);
-  const [editingDocumentTypeId, setEditingDocumentTypeId] = useState<string | null>(null);
+  const [expandedDocumentTypeIds, setExpandedDocumentTypeIds] = useState(
+    () => new Set<string>(),
+  );
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [description, setDescription] = useState("");
-  const [promptTemplate, setPromptTemplate] = useState(defaultPrompt);
-  const [fields, setFields] = useState<FieldDraft[]>([buildFieldDraft()]);
-  const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
-  const [dropFieldId, setDropFieldId] = useState<string | null>(null);
-  const isEditing = editingDocumentTypeId !== null;
+  const [activeReorder, setActiveReorder] = useState<ReorderState | null>(null);
+  const [dropTarget, setDropTarget] = useState<ReorderState | null>(null);
+  const [dragPreview, setDragPreview] = useState<DragPreviewState | null>(null);
 
-  const suggestedSlug = useMemo(() => slugify(name), [name]);
-
-  function updateField(id: string, patch: Partial<FieldDraft>) {
-    setFields((currentFields) =>
-      currentFields.map((field) =>
-        field.id === id ? { ...field, ...patch } : field,
-      ),
-    );
-  }
-
-  function removeField(id: string) {
-    setFields((currentFields) => currentFields.filter((field) => field.id !== id));
-  }
-
-  function updateProductColumn(
-    fieldId: string,
-    columnId: string,
-    patch: Partial<ProductColumnDraft>,
+  function beginFieldReorder(
+    scope: string,
+    itemId: string,
+    preview: Omit<DragPreviewState, "x" | "y"> & { x: number; y: number },
   ) {
-    setFields((currentFields) =>
-      currentFields.map((field) =>
-        field.id === fieldId
-          ? {
-              ...field,
-              columns: field.columns.map((column) =>
-                column.id === columnId ? { ...column, ...patch } : column,
-              ),
-            }
-          : field,
-      ),
+    setActiveReorder({ scope, itemId });
+    setDropTarget(null);
+    setDragPreview(preview);
+  }
+
+  function updateDragPreviewPosition(clientX: number, clientY: number) {
+    setDragPreview((currentPreview) =>
+      currentPreview
+        ? {
+            ...currentPreview,
+            x: clientX,
+            y: clientY,
+          }
+        : currentPreview,
     );
   }
 
-  function addProductColumn(fieldId: string) {
-    setFields((currentFields) =>
-      currentFields.map((field) =>
-        field.id === fieldId
-          ? { ...field, columns: [...field.columns, buildProductColumnDraft()] }
-          : field,
-      ),
-    );
-  }
-
-  function removeProductColumn(fieldId: string, columnId: string) {
-    setFields((currentFields) =>
-      currentFields.map((field) =>
-        field.id === fieldId
-          ? {
-              ...field,
-              columns:
-                field.columns.length > 1
-                  ? field.columns.filter((column) => column.id !== columnId)
-                  : field.columns,
-            }
-          : field,
-      ),
-    );
-  }
-
-  function moveField(fieldId: string, targetFieldId: string) {
-    if (fieldId === targetFieldId) {
+  function updateFieldReorderTarget(scope: string, clientX: number, clientY: number) {
+    if (!activeReorder || activeReorder.scope !== scope) {
       return;
     }
 
-    setFields((currentFields) => {
-      const sourceIndex = currentFields.findIndex((field) => field.id === fieldId);
-      const targetIndex = currentFields.findIndex((field) => field.id === targetFieldId);
+    const targetElement = document.elementFromPoint(clientX, clientY);
 
-      if (sourceIndex < 0 || targetIndex < 0) {
-        return currentFields;
-      }
+    if (!(targetElement instanceof HTMLElement)) {
+      setDropTarget(null);
+      return;
+    }
 
-      const nextFields = [...currentFields];
-      const [movedField] = nextFields.splice(sourceIndex, 1);
-      nextFields.splice(targetIndex, 0, movedField);
-      return nextFields;
-    });
+    const reorderTarget = targetElement.closest<HTMLElement>("[data-reorder-target='true']");
+
+    if (!reorderTarget) {
+      setDropTarget(null);
+      return;
+    }
+
+    const targetScope = reorderTarget.dataset.reorderScope;
+    const targetId = reorderTarget.dataset.reorderId;
+
+    if (!targetScope || !targetId || targetScope !== scope || targetId === activeReorder.itemId) {
+      setDropTarget(null);
+      return;
+    }
+
+    setDropTarget({ scope: targetScope, itemId: targetId });
   }
 
-  function moveFieldByOffset(fieldId: string, offset: -1 | 1) {
-    setFields((currentFields) => {
-      const sourceIndex = currentFields.findIndex((field) => field.id === fieldId);
-      const targetIndex = sourceIndex + offset;
-
-      if (sourceIndex < 0 || targetIndex < 0 || targetIndex >= currentFields.length) {
-        return currentFields;
-      }
-
-      const nextFields = [...currentFields];
-      const [movedField] = nextFields.splice(sourceIndex, 1);
-      nextFields.splice(targetIndex, 0, movedField);
-      return nextFields;
-    });
+  function clearFieldReorder() {
+    setActiveReorder(null);
+    setDropTarget(null);
+    setDragPreview(null);
   }
 
-  function resetForm() {
-    setEditingDocumentTypeId(null);
-    setName("");
-    setSlug("");
-    setDescription("");
-    setPromptTemplate(defaultPrompt);
-    setFields([buildFieldDraft()]);
-    setDraggingFieldId(null);
-    setDropFieldId(null);
+  function commitFieldReorder(scope: string, sourceId: string, targetId: string) {
+    if (scope.startsWith("saved:")) {
+      reorderSavedField(scope.slice("saved:".length), sourceId, targetId);
+    }
   }
 
-  function startEditing(documentType: DocumentType) {
-    const nextForm = applyDocumentTypeToForm(documentType);
+  useEffect(() => {
+    if (!activeReorder) {
+      return;
+    }
 
-    setEditingDocumentTypeId(documentType.id);
-    setName(nextForm.name);
-    setSlug(nextForm.slug);
-    setDescription(nextForm.description);
-    setPromptTemplate(nextForm.promptTemplate);
-    setFields(nextForm.fields.length > 0 ? nextForm.fields : [buildFieldDraft()]);
-    setError(null);
-    setMessage(`Editing ${documentType.name}.`);
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setMessage(null);
-
-    const payload = {
-      name,
-      slug: slug || suggestedSlug,
-      description,
-      promptTemplate,
-      fields: fields.map((field) => ({
-        key: normalizeFieldKey(field.key),
-        label: field.label,
-        kind: field.kind,
-        required: field.required,
-        aliases: field.aliases
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean),
-        description: field.description,
-        ...(field.kind === "products"
-          ? {
-              columns: field.columns.map((column) => ({
-                key: normalizeFieldKey(column.key),
-                label: column.label,
-                kind: column.kind,
-                required: column.required,
-                aliases: column.aliases
-                  .split(",")
-                  .map((value) => value.trim())
-                  .filter(Boolean),
-                description: column.description,
-              })),
-            }
-          : {}),
-      })),
+    const handlePointerMove = (event: PointerEvent) => {
+      updateDragPreviewPosition(event.clientX, event.clientY);
+      updateFieldReorderTarget(activeReorder.scope, event.clientX, event.clientY);
     };
+
+    const handlePointerUp = () => {
+      if (
+        activeReorder.scope === dropTarget?.scope &&
+        activeReorder.itemId !== dropTarget?.itemId &&
+        dropTarget?.itemId
+      ) {
+        commitFieldReorder(activeReorder.scope, activeReorder.itemId, dropTarget.itemId);
+      }
+
+      clearFieldReorder();
+    };
+
+    const handlePointerCancel = () => {
+      clearFieldReorder();
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+    };
+  }, [activeReorder, dropTarget]);
+
+  function updateDocumentTypeFields(
+    documentTypeId: string,
+    updater: (currentFields: FieldDefinition[]) => FieldDefinition[],
+  ): {
+    previousDocumentType: DocumentType | null;
+    nextDocumentType: DocumentType | null;
+  } {
+    let previousDocumentType: DocumentType | null = null;
+    let nextDocumentType: DocumentType | null = null;
+
+    setDocumentTypes((currentDocumentTypes) => {
+      const nextDocumentTypes = currentDocumentTypes.map((documentType) => {
+        if (documentType.id !== documentTypeId) {
+          return documentType;
+        }
+
+        previousDocumentType = documentType;
+        const nextFields = updater(documentType.fields);
+
+        if (nextFields === documentType.fields) {
+          return documentType;
+        }
+
+        nextDocumentType = {
+          ...documentType,
+          fields: nextFields,
+        };
+
+        return nextDocumentType;
+      });
+
+      return nextDocumentTypes;
+    });
+
+    return {
+      previousDocumentType,
+      nextDocumentType,
+    };
+  }
+
+  function persistDocumentTypeFields(
+    documentType: DocumentType,
+    successMessage: string,
+    previousDocumentType?: DocumentType,
+  ) {
+    setError(null);
 
     startTransition(async () => {
       try {
-        const endpoint = editingDocumentTypeId
-          ? `/api/document-types/${editingDocumentTypeId}`
-          : "/api/document-types";
-        const method = editingDocumentTypeId ? "PATCH" : "POST";
-        const response = await fetch(endpoint, {
-          method,
+        const response = await fetch(`/api/document-types/${documentType.id}`, {
+          method: "PATCH",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            name: documentType.name,
+            slug: documentType.slug,
+            description: documentType.description,
+            promptTemplate: documentType.promptTemplate,
+            fields: documentType.fields,
+          }),
         });
 
         const data = (await response.json()) as {
@@ -299,483 +234,210 @@ export function DocumentTypesManager({
         };
 
         if (!response.ok || !data.item) {
-          throw new Error(data.error ?? "Document type could not be created.");
+          throw new Error(data.error ?? "Document type could not be updated.");
         }
 
-        const item = data.item;
-
-        setDocumentTypes((current) => {
-          const nextItems = editingDocumentTypeId
-            ? current.map((documentType) =>
-                documentType.id === item.id ? item : documentType,
-              )
-            : [...current, item];
-
-          return nextItems.sort((a, b) => a.name.localeCompare(b.name));
-        });
-        setMessage(
-          editingDocumentTypeId ? `Updated ${item.name}.` : `Created ${item.name}.`,
+        setDocumentTypes((currentDocumentTypes) =>
+          currentDocumentTypes.map((currentDocumentType) =>
+            currentDocumentType.id === data.item?.id ? data.item : currentDocumentType,
+          ),
         );
-        resetForm();
+        setMessage(successMessage);
         router.refresh();
-      } catch (submitError) {
+      } catch (persistError) {
+        if (previousDocumentType) {
+          setDocumentTypes((currentDocumentTypes) =>
+            currentDocumentTypes.map((currentDocumentType) =>
+              currentDocumentType.id === previousDocumentType.id
+                ? previousDocumentType
+                : currentDocumentType,
+            ),
+          );
+        }
+
         setError(
-          submitError instanceof Error
-            ? submitError.message
-            : isEditing
-              ? "Document type could not be updated."
-              : "Document type could not be created.",
+          persistError instanceof Error
+            ? persistError.message
+            : "Document type could not be updated.",
         );
       }
     });
   }
 
+  function reorderSavedField(documentTypeId: string, fieldKey: string, targetFieldKey: string) {
+    const { previousDocumentType, nextDocumentType } = updateDocumentTypeFields(
+      documentTypeId,
+      (currentFields) => {
+        const sourceIndex = currentFields.findIndex((field) => field.key === fieldKey);
+        const targetIndex = currentFields.findIndex((field) => field.key === targetFieldKey);
+        return moveListItem(currentFields, sourceIndex, targetIndex);
+      },
+    );
+
+    if (!nextDocumentType || !previousDocumentType) {
+      return;
+    }
+
+    persistDocumentTypeFields(
+      nextDocumentType,
+      `Updated field order for ${nextDocumentType.name}.`,
+      previousDocumentType,
+    );
+  }
+
+  function toggleDocumentTypeExpanded(documentTypeId: string) {
+    setExpandedDocumentTypeIds((currentExpandedIds) => {
+      const nextExpandedIds = new Set(currentExpandedIds);
+
+      if (nextExpandedIds.has(documentTypeId)) {
+        nextExpandedIds.delete(documentTypeId);
+      } else {
+        nextExpandedIds.add(documentTypeId);
+      }
+
+      return nextExpandedIds;
+    });
+  }
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+    <div className="space-y-6">
       <section className="paper-panel p-6 sm:p-8">
         <p className="data-label">Schema Registry</p>
-        <h1 className="mt-3 text-3xl font-semibold">Document type configuration</h1>
-        <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--muted)] sm:text-base">
-          Each document type stores its expected fields and its prompt template. The
-          extraction pipeline uses the schema as the output contract for Ollama.
-        </p>
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-semibold">Document type configuration</h1>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--muted)] sm:text-base">
+              Each document type stores its expected fields and its prompt template. The
+              extraction pipeline uses the schema as the output contract for Ollama.
+            </p>
+          </div>
+          <Link className="action-button" href="/document-types/new">
+            New Document Type
+          </Link>
+        </div>
         <div className="mt-8 space-y-4">
-          {documentTypes.map((documentType) => (
-            <article
-              key={documentType.id}
-              className="border-2 border-[var(--ink)] bg-[var(--panel-strong)] p-5"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-semibold">{documentType.name}</h2>
-                  <p className="mt-1 font-mono text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
-                    {documentType.slug}
-                  </p>
-                </div>
-                <span className="status-pill" data-state="uploaded">
-                  {documentType.fields.length} fields
-                </span>
-              </div>
-              <p className="mt-4 text-sm leading-7 text-[var(--muted)]">
-                {documentType.description}
-              </p>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {documentType.fields.map((field) => (
-                  <div
-                    key={`${documentType.id}-${field.key}`}
-                    className="schema-field-card p-3"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium">{field.label}</p>
-                      <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
-                        {field.kind}
-                      </span>
-                    </div>
-                    <p className="mt-1 font-mono text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
-                      {field.key}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-5 flex flex-wrap gap-3">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => startEditing(documentType)}
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            {documentTypes.map((documentType) => {
+              const isExpanded = expandedDocumentTypeIds.has(documentType.id);
+              const contentId = `document-type-panel-${documentType.id}`;
+
+              return (
+                <article
+                  key={documentType.id}
+                  className="border-2 border-[var(--ink)] bg-[var(--panel-strong)] p-5"
                 >
-                  Edit Type
-                </button>
-              </div>
-            </article>
-          ))}
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-semibold">{documentType.name}</h2>
+                      <p className="mt-1 font-mono text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
+                        {documentType.slug}
+                      </p>
+                    </div>
+                    <button
+                      aria-controls={contentId}
+                      aria-expanded={isExpanded}
+                      className="inline-flex items-center gap-2 border-2 border-[var(--line)] px-3 py-2 font-mono text-xs uppercase tracking-[0.18em] text-[var(--paper)] transition hover:border-[var(--ink)]"
+                      onClick={() => toggleDocumentTypeExpanded(documentType.id)}
+                      type="button"
+                    >
+                      <span>{documentType.fields.length} fields</span>
+                      <FontAwesomeIcon
+                        aria-hidden="true"
+                        icon={isExpanded ? faChevronUp : faChevronDown}
+                      />
+                      <span className="sr-only">
+                        {isExpanded ? "Collapse" : "Expand"} {documentType.name}
+                      </span>
+                    </button>
+                  </div>
+                  <p className="mt-4 text-sm leading-7 text-[var(--muted)]">
+                    {documentType.description}
+                  </p>
+                  <div id={contentId} className="mt-5" hidden={!isExpanded}>
+                    <div className="divider" aria-hidden="true" />
+                    <p className="mt-4 text-sm leading-7 text-[var(--muted)]">
+                      Drag fields by the handle to update this saved order immediately.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {documentType.fields.map((field, index) => {
+                        const reorderScope = buildSavedFieldScope(documentType.id);
+                        const isDropTarget =
+                          dropTarget?.scope === reorderScope && dropTarget.itemId === field.key;
+                        const isActiveDrag =
+                          activeReorder?.scope === reorderScope &&
+                          activeReorder.itemId === field.key;
+
+                        return (
+                          <div key={`${documentType.id}-${field.key}`} className="relative">
+                            <div
+                              className={`schema-field-card saved-field-card relative transition-[border-color,opacity,transform] ${
+                                isDropTarget
+                                  ? "border-[var(--accent-strong)]"
+                                  : "border-[var(--ink)]"
+                              } ${isActiveDrag ? "opacity-65" : "opacity-100"}`}
+                              data-reorder-id={field.key}
+                              data-reorder-scope={reorderScope}
+                              data-reorder-target="true"
+                            >
+                              <button
+                                aria-label={`Drag ${field.label || `field ${index + 1}`}`}
+                                className="field-drag-handle"
+                                onPointerDown={(event) => {
+                                  event.preventDefault();
+                                  beginFieldReorder(reorderScope, field.key, {
+                                    title: field.label || `Field ${index + 1}`,
+                                    subtitle: `${field.kind.toUpperCase()} · ${field.key}`,
+                                    x: event.clientX,
+                                    y: event.clientY,
+                                  });
+                                }}
+                                type="button"
+                              >
+                                <span className="field-drag-handle__bars" aria-hidden="true">
+                                  <span />
+                                  <span />
+                                  <span />
+                                </span>
+                              </button>
+                              {isDropTarget ? (
+                                <span className="reorder-drop-indicator" aria-hidden="true" />
+                              ) : null}
+                              <div className="saved-field-card__content">
+                                <p className="font-medium">{field.label}</p>
+                                <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
+                                  {field.kind}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-5 flex flex-wrap gap-3">
+                      <Link className="secondary-button" href={`/document-types/${documentType.id}`}>
+                        Edit Type
+                      </Link>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </div>
       </section>
 
-      <section className="paper-panel p-6 sm:p-8">
-        <p className="data-label">{isEditing ? "Edit Type" : "Create Type"}</p>
-        <h2 className="mt-3 text-2xl font-semibold">
-          {isEditing ? "Update extraction schema" : "New extraction schema"}
-        </h2>
-        <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-          {isEditing
-            ? "Changes apply to the stored document type definition and future extraction runs. Existing extracted records remain unchanged."
-            : "Create a reusable schema for a document layout and define the fields Ollama should return."}
-        </p>
-        <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
-          <label className="block space-y-2">
-            <span className="data-label">Name</span>
-            <input
-              className="input-base"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Purchase order"
-            />
-          </label>
-
-          <label className="block space-y-2">
-            <span className="data-label">Slug</span>
-            <input
-              className="input-base font-mono"
-              value={slug}
-              onChange={(event) => setSlug(slugify(event.target.value))}
-              placeholder={suggestedSlug || "purchase-order"}
-            />
-          </label>
-
-          <label className="block space-y-2">
-            <span className="data-label">Description</span>
-            <textarea
-              className="textarea-base"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Describe the document layout and what makes it distinct."
-            />
-          </label>
-
-          <label className="block space-y-2">
-            <span className="data-label">Prompt Template</span>
-            <textarea
-              className="textarea-base"
-              value={promptTemplate}
-              onChange={(event) => setPromptTemplate(event.target.value)}
-            />
-          </label>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="data-label">Expected Fields</span>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => setFields((currentFields) => [...currentFields, buildFieldDraft()])}
-              >
-                Add Field
-              </button>
-            </div>
-            <p className="text-sm leading-7 text-[var(--muted)]">
-              Drag by the handle to change the saved field order. That same order is used
-              when reviewing extracted documents.
-            </p>
-            {fields.map((field, index) => (
-              <div
-                key={field.id}
-                className={`space-y-3 border-2 bg-[var(--panel-strong)] p-4 ${
-                  dropFieldId === field.id
-                    ? "border-[var(--accent-strong)]"
-                    : "border-[var(--ink)]"
-                }`}
-                onDragLeave={() => {
-                  if (dropFieldId === field.id) {
-                    setDropFieldId(null);
-                  }
-                }}
-                onDragOver={(event) => {
-                  if (!draggingFieldId || draggingFieldId === field.id) {
-                    return;
-                  }
-
-                  event.preventDefault();
-                  setDropFieldId(field.id);
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-
-                  if (draggingFieldId) {
-                    moveField(draggingFieldId, field.id);
-                  }
-
-                  setDraggingFieldId(null);
-                  setDropFieldId(null);
-                }}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="secondary-button px-3 py-2"
-                      draggable
-                      onDragEnd={() => {
-                        setDraggingFieldId(null);
-                        setDropFieldId(null);
-                      }}
-                      onDragStart={(event) => {
-                        setDraggingFieldId(field.id);
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", field.id);
-                      }}
-                      type="button"
-                    >
-                      Drag
-                    </button>
-                    <p className="font-medium uppercase tracking-[0.14em]">Field {index + 1}</p>
-                  </div>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <button
-                      className="secondary-button px-3 py-2"
-                      disabled={index === 0}
-                      onClick={() => moveFieldByOffset(field.id, -1)}
-                      type="button"
-                    >
-                      Up
-                    </button>
-                    <button
-                      className="secondary-button px-3 py-2"
-                      disabled={index === fields.length - 1}
-                      onClick={() => moveFieldByOffset(field.id, 1)}
-                      type="button"
-                    >
-                      Down
-                    </button>
-                    {fields.length > 1 ? (
-                      <button
-                        className="danger-button"
-                        type="button"
-                        onClick={() => removeField(field.id)}
-                      >
-                        Remove
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block space-y-2">
-                    <span className="data-label">Key</span>
-                    <input
-                      className="input-base font-mono"
-                      value={field.key}
-                      onChange={(event) =>
-                        updateField(field.id, {
-                          key: normalizeFieldKey(event.target.value),
-                        })
-                      }
-                      placeholder="invoice_number"
-                    />
-                  </label>
-                  <label className="block space-y-2">
-                    <span className="data-label">Label</span>
-                    <input
-                      className="input-base"
-                      value={field.label}
-                      onChange={(event) => updateField(field.id, { label: event.target.value })}
-                      placeholder="Invoice Number"
-                    />
-                  </label>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block space-y-2">
-                    <span className="data-label">Kind</span>
-                    <select
-                      className="select-base"
-                      value={field.kind}
-                      onChange={(event) =>
-                        updateField(field.id, {
-                          kind: event.target.value as FieldDefinition["kind"],
-                          columns:
-                            event.target.value === "products" && field.columns.length === 0
-                              ? [buildProductColumnDraft()]
-                              : field.columns,
-                        })
-                      }
-                    >
-                      {fieldKindValues.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="schema-toggle">
-                    <input
-                      className="h-4 w-4 accent-[var(--accent)]"
-                      checked={field.required}
-                      onChange={(event) =>
-                        updateField(field.id, { required: event.target.checked })
-                      }
-                      type="checkbox"
-                    />
-                    <span className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--ink)]">
-                      Required field
-                    </span>
-                  </label>
-                </div>
-                <label className="block space-y-2">
-                  <span className="data-label">Aliases</span>
-                  <input
-                    className="input-base"
-                    value={field.aliases}
-                    onChange={(event) => updateField(field.id, { aliases: event.target.value })}
-                    placeholder="invoice #, ref, reference"
-                  />
-                </label>
-                <label className="block space-y-2">
-                  <span className="data-label">Description</span>
-                  <textarea
-                    className="textarea-base"
-                    value={field.description}
-                    onChange={(event) =>
-                      updateField(field.id, { description: event.target.value })
-                    }
-                    placeholder="How the value should be interpreted by the model."
-                  />
-                </label>
-
-                {field.kind === "products" ? (
-                  <div className="space-y-4 border-t border-[color:var(--line)] pt-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="data-label">Product Columns</p>
-                        <p className="mt-1 text-sm text-[var(--muted)]">
-                          Define one row schema for repeating line items.
-                        </p>
-                      </div>
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        onClick={() => addProductColumn(field.id)}
-                      >
-                        Add Column
-                      </button>
-                    </div>
-
-                    {field.columns.map((column, columnIndex) => (
-                      <div
-                        key={column.id}
-                        className="space-y-3 border border-[color:var(--line)] bg-[var(--panel)] p-4"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-medium uppercase tracking-[0.14em]">
-                            Column {columnIndex + 1}
-                          </p>
-                          {field.columns.length > 1 ? (
-                            <button
-                              className="danger-button"
-                              type="button"
-                              onClick={() => removeProductColumn(field.id, column.id)}
-                            >
-                              Remove
-                            </button>
-                          ) : null}
-                        </div>
-
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="block space-y-2">
-                            <span className="data-label">Column Key</span>
-                            <input
-                              className="input-base font-mono"
-                              value={column.key}
-                              onChange={(event) =>
-                                updateProductColumn(field.id, column.id, {
-                                  key: normalizeFieldKey(event.target.value),
-                                })
-                              }
-                              placeholder="sku"
-                            />
-                          </label>
-                          <label className="block space-y-2">
-                            <span className="data-label">Column Label</span>
-                            <input
-                              className="input-base"
-                              value={column.label}
-                              onChange={(event) =>
-                                updateProductColumn(field.id, column.id, {
-                                  label: event.target.value,
-                                })
-                              }
-                              placeholder="SKU"
-                            />
-                          </label>
-                        </div>
-
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="block space-y-2">
-                            <span className="data-label">Column Kind</span>
-                            <select
-                              className="select-base"
-                              value={column.kind}
-                              onChange={(event) =>
-                                updateProductColumn(field.id, column.id, {
-                                  kind: event.target.value as ProductColumnDefinition["kind"],
-                                })
-                              }
-                            >
-                              {scalarFieldKindValues.map((value) => (
-                                <option key={value} value={value}>
-                                  {value}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="schema-toggle">
-                            <input
-                              className="h-4 w-4 accent-[var(--accent)]"
-                              checked={column.required}
-                              onChange={(event) =>
-                                updateProductColumn(field.id, column.id, {
-                                  required: event.target.checked,
-                                })
-                              }
-                              type="checkbox"
-                            />
-                            <span className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--ink)]">
-                              Required column
-                            </span>
-                          </label>
-                        </div>
-
-                        <label className="block space-y-2">
-                          <span className="data-label">Column Aliases</span>
-                          <input
-                            className="input-base"
-                            value={column.aliases}
-                            onChange={(event) =>
-                              updateProductColumn(field.id, column.id, {
-                                aliases: event.target.value,
-                              })
-                            }
-                            placeholder="item code, stock code"
-                          />
-                        </label>
-
-                        <label className="block space-y-2">
-                          <span className="data-label">Column Description</span>
-                          <textarea
-                            className="textarea-base"
-                            value={column.description}
-                            onChange={(event) =>
-                              updateProductColumn(field.id, column.id, {
-                                description: event.target.value,
-                              })
-                            }
-                            placeholder="How this column should be interpreted in each row."
-                          />
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-
-          {message ? <p className="text-sm text-[var(--success)]">{message}</p> : null}
-          {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-
-          <div className="flex flex-wrap gap-3">
-            <button className="action-button flex-1" disabled={isPending} type="submit">
-              {isPending ? "Saving…" : isEditing ? "Update Document Type" : "Save Document Type"}
-            </button>
-            {isEditing ? (
-              <button
-                className="secondary-button"
-                disabled={isPending}
-                onClick={resetForm}
-                type="button"
-              >
-                Cancel Edit
-              </button>
-            ) : null}
-          </div>
-        </form>
-      </section>
+      {dragPreview ? (
+        <div
+          className="field-drag-preview"
+          style={{
+            left: dragPreview.x + 18,
+            top: dragPreview.y + 18,
+          }}
+        >
+          <p className="field-drag-preview__title">{dragPreview.title}</p>
+          <p className="field-drag-preview__subtitle">{dragPreview.subtitle}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
