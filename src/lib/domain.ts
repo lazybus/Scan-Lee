@@ -68,6 +68,9 @@ export const documentTypeInputSchema = z.object({
 
 export const documentTypeSchema = documentTypeInputSchema.extend({
   id: z.string(),
+  ownerUserId: z.string().nullable().optional(),
+  isPublic: z.boolean().optional(),
+  isSystem: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -100,10 +103,12 @@ export const extractedRecordSchema: z.ZodType<ExtractedRecord> = z.record(
 
 export const documentRecordSchema = z.object({
   id: z.string(),
+  ownerUserId: z.string().optional(),
   documentTypeId: z.string(),
   documentTypeName: z.string(),
   originalName: z.string(),
   mimeType: z.string(),
+  storageBucket: z.string().optional(),
   filePath: z.string(),
   sha256: z.string(),
   status: z.enum(extractionStatusValues),

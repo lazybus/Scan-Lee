@@ -17,22 +17,22 @@ function normalizeReviewedData(
   values: ExtractedRecord,
   documentTypeId: string,
 ) {
-  const documentType = getDocumentTypeById(documentTypeId);
+  return getDocumentTypeById(documentTypeId).then((documentType) => {
+    if (!documentType) {
+      return null;
+    }
 
-  if (!documentType) {
-    return null;
-  }
+    const normalizedData = normalizeExtractedData(documentType.fields, values);
+    const knownKeys = new Set(documentType.fields.map((field) => field.key));
+    const extraEntries = Object.entries(values)
+      .filter(([key]) => !knownKeys.has(key))
+      .map(([key, value]) => [key, value] as const);
 
-  const normalizedData = normalizeExtractedData(documentType.fields, values);
-  const knownKeys = new Set(documentType.fields.map((field) => field.key));
-  const extraEntries = Object.entries(values)
-    .filter(([key]) => !knownKeys.has(key))
-    .map(([key, value]) => [key, value] as const);
-
-  return {
-    ...normalizedData,
-    ...Object.fromEntries(extraEntries),
-  };
+    return {
+      ...normalizedData,
+      ...Object.fromEntries(extraEntries),
+    };
+  });
 }
 
 export async function PATCH(
@@ -40,7 +40,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-  const document = getDocumentById(id);
+  const document = await getDocumentById(id);
 
   if (!document) {
     return Response.json({ error: "Document was not found." }, { status: 404 });
@@ -52,13 +52,13 @@ export async function PATCH(
     return Response.json({ error: "Reviewed data is invalid." }, { status: 400 });
   }
 
-  const reviewedData = normalizeReviewedData(body.data.reviewedData, document.documentTypeId);
+  const reviewedData = await normalizeReviewedData(body.data.reviewedData, document.documentTypeId);
 
   if (!reviewedData) {
     return Response.json({ error: "Document type was not found." }, { status: 404 });
   }
 
-  const updated = updateDocumentReview({
+  const updated = await updateDocumentReview({
     id,
     reviewedData,
     status: body.data.status,
@@ -76,20 +76,20 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-  const document = getDocumentById(id);
+  const document = await getDocumentById(id);
 
   if (!document) {
     return Response.json({ error: "Document was not found." }, { status: 404 });
   }
 
   try {
-    const deleted = deleteDocument(id);
+    const deleted = await deleteDocument(id);
 
     if (!deleted) {
       return Response.json({ error: "Document was not found." }, { status: 404 });
     }
 
-    await deleteStoredFile(deleted.filePath);
+    await deleteStoredFile(deleted.filePath, deleted.storageBucket);
 
     return Response.json({ item: deleted });
   } catch (error) {

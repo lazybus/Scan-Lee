@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST() {
   try {
-    const documents = listDocuments();
+    const documents = await listDocuments();
     const queuedDocuments = documents.filter((document) => document.status !== "processing");
 
     if (queuedDocuments.length === 0) {

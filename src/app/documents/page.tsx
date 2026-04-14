@@ -4,9 +4,11 @@ import { listDocuments } from "@/lib/documents";
 
 export const dynamic = "force-dynamic";
 
-export default function DocumentsPage() {
-  const documentTypes = listDocumentTypes();
-  const documents = listDocuments();
+export default async function DocumentsPage() {
+  const [documentTypes, documents] = await Promise.all([
+    listDocumentTypes(),
+    listDocuments(),
+  ]);
 
   return (
     <DocumentsWorkbench

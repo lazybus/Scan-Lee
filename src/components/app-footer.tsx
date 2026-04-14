@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-type OllamaHealth = {
+type AiHealth = {
   connected: boolean;
   modelName: string;
   available?: boolean;
@@ -10,15 +10,15 @@ type OllamaHealth = {
 };
 
 export function AppFooter() {
-  const [health, setHealth] = useState<OllamaHealth | null>(null);
+  const [health, setHealth] = useState<AiHealth | null>(null);
 
   useEffect(() => {
     let active = true;
 
     async function loadHealth() {
       try {
-        const response = await fetch("/api/health/ollama", { cache: "no-store" });
-        const data = (await response.json()) as OllamaHealth;
+        const response = await fetch("/api/health/ai", { cache: "no-store" });
+        const data = (await response.json()) as AiHealth;
 
         if (active) {
           setHealth(data);
@@ -28,7 +28,7 @@ export function AppFooter() {
           setHealth({
             connected: false,
             modelName: "unknown",
-            reason: "Could not reach the local health route.",
+            reason: "Could not reach the AI health route.",
           });
         }
       }
@@ -61,7 +61,7 @@ export function AppFooter() {
         <div className="space-y-2">
           <p className="data-label">Status</p>
           <div className="flex flex-wrap items-center gap-3 text-sm sm:text-base">
-            <span className="font-semibold text-[var(--ink)]">Ollama</span>
+            <span className="font-semibold text-[var(--ink)]">Google AI Studio</span>
             <span className="status-pill" data-state={healthState}>
               {healthLabel}
             </span>

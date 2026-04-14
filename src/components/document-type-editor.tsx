@@ -131,6 +131,7 @@ function buildFormState(documentType?: DocumentType | null) {
       slug: "",
       description: "",
       promptTemplate: defaultPrompt,
+      isPublic: false,
       fields: [buildFieldDraft()],
     };
   }
@@ -140,6 +141,7 @@ function buildFormState(documentType?: DocumentType | null) {
     slug: documentType.slug,
     description: documentType.description,
     promptTemplate: documentType.promptTemplate,
+    isPublic: documentType.isPublic ?? false,
     fields: documentType.fields.map(buildFieldDraftFromDefinition),
   };
 }
@@ -176,8 +178,10 @@ function buildColumnReorderScope(fieldId: string) {
 }
 
 export function DocumentTypeEditor({
+  currentUserId,
   initialDocumentType,
 }: {
+  currentUserId: string;
   initialDocumentType?: DocumentType | null;
 }) {
   const router = useRouter();
@@ -195,6 +199,7 @@ export function DocumentTypeEditor({
   const [slug, setSlug] = useState(initialForm.slug);
   const [description, setDescription] = useState(initialForm.description);
   const [promptTemplate, setPromptTemplate] = useState(initialForm.promptTemplate);
+  const [isPublic, setIsPublic] = useState(initialForm.isPublic);
   const [fields, setFields] = useState<FieldDraft[]>(initialForm.fields);
   const [fieldLayoutMode, setFieldLayoutMode] = useState<FieldLayoutMode>("double");
   const [columnLayoutModes, setColumnLayoutModes] = useState<Record<string, ColumnLayoutMode>>({});
@@ -204,6 +209,14 @@ export function DocumentTypeEditor({
   const [fullWidthColumnIds, setFullWidthColumnIds] = useState<Record<string, string | null>>({});
   const isEditing = editingDocumentTypeId !== null;
   const suggestedSlug = useMemo(() => slugify(name), [name]);
+  const isOwnedByCurrentUser = initialDocumentType?.ownerUserId === currentUserId;
+  const isReadOnly = Boolean(isEditing && (!isOwnedByCurrentUser || initialDocumentType?.isSystem));
+  const canDuplicate = Boolean(isEditing && isReadOnly);
+  const ownershipLabel = initialDocumentType?.isSystem
+    ? "Built-in default"
+    : isOwnedByCurrentUser
+      ? "Owned by you"
+      : "Shared template";
 
   useEffect(() => {
     setEditingDocumentTypeId(initialDocumentType?.id ?? null);
@@ -211,6 +224,7 @@ export function DocumentTypeEditor({
     setSlug(initialForm.slug);
     setDescription(initialForm.description);
     setPromptTemplate(initialForm.promptTemplate);
+    setIsPublic(initialForm.isPublic);
     setFields(initialForm.fields);
     setFieldLayoutMode("double");
     setColumnLayoutModes({});
@@ -559,6 +573,13 @@ export function DocumentTypeEditor({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (isReadOnly) {
+      setError("This template is read-only. Duplicate it to your account before editing.");
+      setMessage(null);
+      return;
+    }
+
     setError(null);
     setMessage(null);
 
@@ -567,6 +588,7 @@ export function DocumentTypeEditor({
       slug: slug || suggestedSlug,
       description,
       promptTemplate,
+      isPublic,
       fields: fields.map((field) => ({
         key: normalizeFieldKey(field.key),
         label: field.label,
@@ -639,6 +661,40 @@ export function DocumentTypeEditor({
     });
   }
 
+  function duplicateToAccount() {
+    if (!editingDocumentTypeId) {
+      return;
+    }
+
+    setError(null);
+    setMessage(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/document-types/${editingDocumentTypeId}/duplicate`, {
+          method: "POST",
+        });
+        const data = (await response.json()) as {
+          item?: DocumentType;
+          error?: string;
+        };
+
+        if (!response.ok || !data.item) {
+          throw new Error(data.error ?? "Document type could not be duplicated.");
+        }
+
+        router.push(`/document-types/${data.item.id}`);
+        router.refresh();
+      } catch (duplicateError) {
+        setError(
+          duplicateError instanceof Error
+            ? duplicateError.message
+            : "Document type could not be duplicated.",
+        );
+      }
+    });
+  }
+
   return (
     <>
       <section className="paper-panel p-6 sm:p-8">
@@ -646,19 +702,51 @@ export function DocumentTypeEditor({
       <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">
-            {isEditing ? "Update extraction schema" : "New extraction schema"}
+            {isReadOnly
+              ? "View template schema"
+              : isEditing
+                ? "Update extraction schema"
+                : "New extraction schema"}
           </h1>
           <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--muted)]">
-            {isEditing
+            {isReadOnly
+              ? "This template is visible in your workspace but cannot be edited directly. Duplicate it to create a private version under your account."
+              : isEditing
               ? "Changes apply to the stored document type definition and future extraction runs. Existing extracted records remain unchanged."
               : "Create a reusable schema for a document layout and define the fields Ollama should return."}
           </p>
         </div>
-        <button className="secondary-button" onClick={() => router.push("/document-types")} type="button">
-          Back to Types
-        </button>
+        <div className="flex flex-wrap gap-3">
+          {canDuplicate ? (
+            <button className="action-button" disabled={isPending} onClick={duplicateToAccount} type="button">
+              {isPending ? "Duplicating…" : "Duplicate to My Account"}
+            </button>
+          ) : null}
+          <button className="secondary-button" onClick={() => router.push("/document-types")} type="button">
+            Back to Types
+          </button>
+        </div>
       </div>
+      {isEditing ? (
+        <div className="mt-6 flex flex-wrap gap-3">
+          <span className="inline-flex border border-[var(--line)] px-3 py-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
+            {ownershipLabel}
+          </span>
+          <span className="inline-flex border border-[var(--line)] px-3 py-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
+            {initialDocumentType?.isPublic ? "Public" : "Private"}
+          </span>
+          <span className="inline-flex border border-[var(--line)] px-3 py-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
+            {isReadOnly ? "Read-only" : "Editable"}
+          </span>
+        </div>
+      ) : null}
+      {isReadOnly ? (
+        <div className="mt-6 border-2 border-[var(--line)] bg-[var(--panel)] p-4 text-sm leading-7 text-[var(--muted)]">
+          Public and system templates are intentionally read-only. Duplicating creates a private copy that you can rename, share, and customize without affecting the original template.
+        </div>
+      ) : null}
       <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
+        <fieldset className="space-y-5" disabled={isPending || isReadOnly}>
         <div className="grid gap-5 lg:grid-cols-2">
           <label className="block space-y-2">
             <span className="data-label">Name</span>
@@ -699,6 +787,23 @@ export function DocumentTypeEditor({
             />
           </label>
         </div>
+
+        <label className="schema-toggle border-2 border-[var(--line)] bg-[var(--panel)] px-4 py-3">
+          <input
+            className="h-4 w-4 accent-[var(--accent)]"
+            checked={isPublic}
+            onChange={(event) => setIsPublic(event.target.checked)}
+            type="checkbox"
+          />
+          <span className="space-y-1">
+            <span className="block font-mono text-xs uppercase tracking-[0.16em] text-[var(--ink)]">
+              Share as public template
+            </span>
+            <span className="block text-sm leading-6 text-[var(--muted)]">
+              Public templates stay visible to other users as read-only starting points that they must duplicate before editing.
+            </span>
+          </span>
+        </label>
 
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1256,19 +1361,25 @@ export function DocumentTypeEditor({
         {message ? <p className="text-sm text-[var(--success)]">{message}</p> : null}
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
 
-        <div className="flex flex-wrap gap-3">
-          <button className="action-button flex-1" disabled={isPending} type="submit">
-            {isPending ? "Saving…" : isEditing ? "Update Document Type" : "Save Document Type"}
-          </button>
-          <button
-            className="secondary-button"
-            disabled={isPending}
-            onClick={resetForm}
-            type="button"
-          >
-            {isEditing ? "Back to Types" : "Reset Form"}
-          </button>
-        </div>
+        {!isReadOnly ? (
+          <div className="flex flex-wrap gap-3">
+            <button className="action-button flex-1" disabled={isPending} type="submit">
+              {isPending ? "Saving…" : isEditing ? "Update Document Type" : "Save Document Type"}
+            </button>
+            <button
+              className="secondary-button"
+              disabled={isPending}
+              onClick={resetForm}
+              type="button"
+            >
+              {isEditing ? "Back to Types" : "Reset Form"}
+            </button>
+          </div>
+        ) : null}
+        </fieldset>
+
+        {isReadOnly && message ? <p className="text-sm text-[var(--success)]">{message}</p> : null}
+        {isReadOnly && error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
       </form>
 
       </section>

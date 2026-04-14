@@ -1,16 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname } from "node:path";
 
-const dataDirectory = join(process.cwd(), "data");
-const uploadDirectory = join(dataDirectory, "uploads");
-
-function ensureUploadDirectory() {
-  mkdirSync(uploadDirectory, { recursive: true });
-}
+import { getSupabaseStorageBucket } from "@/lib/supabase/config";
+import { createSupabaseServerComponentClient } from "@/lib/supabase/server";
 
 export type StoredFile = {
+  bucketName: string;
   filePath: string;
   mimeType: string;
   originalName: string;
@@ -18,40 +13,73 @@ export type StoredFile = {
 };
 
 export async function saveUploadedFile(file: File): Promise<StoredFile> {
-  ensureUploadDirectory();
+  const supabase = await createSupabaseServerComponentClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Authentication required.");
+  }
 
   const extension = extname(file.name) || ".bin";
-  const fileName = `${crypto.randomUUID()}${extension.toLowerCase()}`;
-  const relativePath = `uploads/${fileName}`;
-  const absolutePath = join(dataDirectory, ...relativePath.split("/"));
+  const objectPath = `${user.id}/${crypto.randomUUID()}${extension.toLowerCase()}`;
   const buffer = Buffer.from(await file.arrayBuffer());
   const sha256 = createHash("sha256").update(buffer).digest("hex");
+  const bucketName = getSupabaseStorageBucket();
 
-  await writeFile(absolutePath, buffer);
+  const { error } = await supabase.storage.from(bucketName).upload(objectPath, buffer, {
+    contentType: file.type || "application/octet-stream",
+    upsert: false,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
 
   return {
-    filePath: relativePath,
+    bucketName,
+    filePath: objectPath,
     mimeType: file.type || "application/octet-stream",
     originalName: file.name,
     sha256,
   };
 }
 
-export function readStoredFileAsBase64(filePath: string): string {
-  const absolutePath = join(dataDirectory, ...filePath.split("/"));
-  return readFileSync(absolutePath).toString("base64");
+export async function readStoredFileAsBase64(
+  filePath: string,
+  bucketName = getSupabaseStorageBucket(),
+): Promise<string> {
+  const buffer = await readStoredFileBuffer(filePath, bucketName);
+  return buffer.toString("base64");
 }
 
-export async function readStoredFileBuffer(filePath: string): Promise<Buffer> {
-  const absolutePath = join(dataDirectory, ...filePath.split("/"));
-  return readFile(absolutePath);
+export async function readStoredFileBuffer(
+  filePath: string,
+  bucketName = getSupabaseStorageBucket(),
+): Promise<Buffer> {
+  const supabase = await createSupabaseServerComponentClient();
+  const { data, error } = await supabase.storage.from(bucketName).download(filePath);
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Stored file could not be read.");
+  }
+
+  return Buffer.from(await data.arrayBuffer());
 }
 
-export async function deleteStoredFile(filePath: string): Promise<void> {
-  const absolutePath = join(dataDirectory, ...filePath.split("/"));
-  await rm(absolutePath, { force: true });
+export async function deleteStoredFile(
+  filePath: string,
+  bucketName = getSupabaseStorageBucket(),
+): Promise<void> {
+  const supabase = await createSupabaseServerComponentClient();
+  const { error } = await supabase.storage.from(bucketName).remove([filePath]);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
 export function getAbsoluteDataDirectory(): string {
-  return dataDirectory;
+  return process.cwd();
 }

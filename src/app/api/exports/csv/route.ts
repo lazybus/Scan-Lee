@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const documentTypeId = searchParams.get("documentTypeId") ?? undefined;
-  const rows = getExportRows(documentTypeId);
+  const rows = await getExportRows(documentTypeId);
 
   if (rows.length === 0) {
     return Response.json({ error: "No extracted rows are available for export." }, { status: 404 });

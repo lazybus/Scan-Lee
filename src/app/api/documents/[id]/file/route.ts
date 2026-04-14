@@ -9,14 +9,14 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-  const document = getDocumentById(id);
+  const document = await getDocumentById(id);
 
   if (!document) {
     return Response.json({ error: "Document was not found." }, { status: 404 });
   }
 
   try {
-    const buffer = await readStoredFileBuffer(document.filePath);
+    const buffer = await readStoredFileBuffer(document.filePath, document.storageBucket);
 
     return new Response(new Uint8Array(buffer), {
       headers: {

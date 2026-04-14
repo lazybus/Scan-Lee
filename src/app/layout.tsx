@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
 
+import { signOutAction } from "@/app/auth/actions";
 import { AppFooter } from "@/components/app-footer";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { hasSupabaseEnv } from "@/lib/supabase/config";
+import { getCurrentUser } from "@/lib/supabase/server";
 import "./globals.css";
 
 const displaySans = Space_Grotesk({
@@ -19,7 +22,7 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Scanlee",
-  description: "Local-first document extraction with Ollama and SQLite.",
+  description: "Secure document extraction with Supabase, personal workspaces, and Ollama.",
 };
 
 const themeInitializationScript = `(() => {
@@ -32,11 +35,13 @@ const themeInitializationScript = `(() => {
   }
 })();`;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const user = hasSupabaseEnv() ? await getCurrentUser().catch(() => null) : null;
+
   return (
     <html
       lang="en"
@@ -66,23 +71,54 @@ export default function RootLayout({
                   <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center xl:justify-end">
                     <nav className="flex flex-wrap gap-3 text-sm font-medium uppercase tracking-[0.16em] xl:justify-end">
                       <Link className="nav-chip" href="/">
-                        Dashboard
+                        Home
                       </Link>
-                      <Link className="nav-chip" href="/document-types">
-                        Document Types
-                      </Link>
-                      <Link className="nav-chip" href="/documents">
-                        Capture + Review
-                      </Link>
+                      {user ? (
+                        <>
+                          <Link className="nav-chip" href="/dashboard">
+                            Dashboard
+                          </Link>
+                          <Link className="nav-chip" href="/document-types">
+                            Document Types
+                          </Link>
+                          <Link className="nav-chip" href="/documents">
+                            Capture + Review
+                          </Link>
+                        </>
+                      ) : (
+                        <>
+                          <Link className="nav-chip" href="/login">
+                            Log In
+                          </Link>
+                          <Link className="nav-chip" href="/register">
+                            Register
+                          </Link>
+                        </>
+                      )}
                     </nav>
-                    <div className="xl:flex-shrink-0">
+                    <div className="flex items-center gap-3 xl:flex-shrink-0">
+                      {user ? (
+                        <div className="hidden text-right xl:block">
+                          <p className="data-label">Signed In</p>
+                          <p className="max-w-56 truncate text-sm text-[var(--muted)]">
+                            {user.email}
+                          </p>
+                        </div>
+                      ) : null}
                       <ThemeToggle />
+                      {user ? (
+                        <form action={signOutAction}>
+                          <button className="secondary-button" type="submit">
+                            Sign Out
+                          </button>
+                        </form>
+                      ) : null}
                     </div>
                   </div>
                 </div>
                 <div>
                   <p className="max-w-xl font-mono text-xs uppercase tracking-[0.22em] text-[var(--muted)]">
-                    Capture local documents, validate them, and export structured records without leaving your machine.
+                    Capture documents, validate structured records, and keep workspace access scoped to each authenticated user.
                   </p>
                 </div>
               </div>

@@ -9,7 +9,7 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-  const item = getDocumentTypeById(id);
+  const item = await getDocumentTypeById(id);
 
   if (!item) {
     return Response.json({ error: "Document type was not found." }, { status: 404 });
@@ -24,7 +24,7 @@ export async function PATCH(
 ) {
   const { id } = await context.params;
 
-  if (!getDocumentTypeById(id)) {
+  if (!(await getDocumentTypeById(id))) {
     return Response.json({ error: "Document type was not found." }, { status: 404 });
   }
 
@@ -34,7 +34,9 @@ export async function PATCH(
       ...payload,
       slug: slugify(String(payload.slug ?? payload.name ?? "")),
     });
-    const item = updateDocumentType(id, parsed);
+    const item = await updateDocumentType(id, parsed, {
+      isPublic: payload.isPublic === true,
+    });
 
     if (!item) {
       return Response.json({ error: "Document type was not found." }, { status: 404 });
@@ -42,11 +44,13 @@ export async function PATCH(
 
     return Response.json({ item });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid document type payload.";
+
     return Response.json(
       {
-        error: error instanceof Error ? error.message : "Invalid document type payload.",
+        error: message,
       },
-      { status: 400 },
+      { status: message.includes("read-only") ? 403 : 400 },
     );
   }
 }

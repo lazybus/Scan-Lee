@@ -1,4 +1,3 @@
-import { getDatabase } from "@/lib/db";
 import { getDocumentTypeById } from "@/lib/document-types";
 import {
   documentRecordSchema,
@@ -7,42 +6,30 @@ import {
   type ExtractedRecord,
   type ExtractedValue,
 } from "@/lib/domain";
+import { createSupabaseServerComponentClient } from "@/lib/supabase/server";
+import type { Database, Json } from "@/lib/supabase/database.types";
 import type { StoredFile } from "@/lib/storage";
 
-type DocumentRow = {
-  id: string;
-  document_type_id: string;
-  document_type_name: string;
-  original_name: string;
-  mime_type: string;
-  file_path: string;
-  sha256: string;
-  status: string;
-  model_name: string | null;
-  extracted_data: string | null;
-  reviewed_data: string | null;
-  raw_response: string | null;
-  error_message: string | null;
-  created_at: string;
-  updated_at: string;
-};
+type DocumentRow = Database["public"]["Tables"]["documents"]["Row"];
 
-function parseRecord(value: string | null): ExtractedRecord | null {
+function parseRecord(value: Json | null): ExtractedRecord | null {
   if (!value) {
     return null;
   }
 
-  return extractedRecordSchema.parse(JSON.parse(value));
+  return extractedRecordSchema.parse(value);
 }
 
-function mapRow(row: DocumentRow): DocumentRecord {
+function mapRow(row: DocumentRow, documentTypeName: string): DocumentRecord {
   return documentRecordSchema.parse({
     id: row.id,
+    ownerUserId: row.owner_user_id,
     documentTypeId: row.document_type_id,
-    documentTypeName: row.document_type_name,
+    documentTypeName,
     originalName: row.original_name,
     mimeType: row.mime_type,
-    filePath: row.file_path,
+    storageBucket: row.storage_bucket,
+    filePath: row.storage_object_path,
     sha256: row.sha256,
     status: row.status,
     modelName: row.model_name,
@@ -55,78 +42,109 @@ function mapRow(row: DocumentRow): DocumentRecord {
   });
 }
 
-function baseSelect() {
-  return `
-    SELECT
-      documents.id,
-      documents.document_type_id,
-      document_types.name as document_type_name,
-      documents.original_name,
-      documents.mime_type,
-      documents.file_path,
-      documents.sha256,
-      documents.status,
-      documents.model_name,
-      documents.extracted_data,
-      documents.reviewed_data,
-      documents.raw_response,
-      documents.error_message,
-      documents.created_at,
-      documents.updated_at
-    FROM documents
-    INNER JOIN document_types ON document_types.id = documents.document_type_id
-  `;
+async function loadDocumentTypeNameMap(documentTypeIds: string[]) {
+  if (documentTypeIds.length === 0) {
+    return new Map<string, string>();
+  }
+
+  const supabase = await createSupabaseServerComponentClient();
+  const { data, error } = await supabase
+    .from("document_types")
+    .select("id, name")
+    .in("id", Array.from(new Set(documentTypeIds)));
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as Array<{ id: string; name: string }>;
+  return new Map(rows.map((item) => [item.id, item.name]));
 }
 
-export function listDocuments(): DocumentRecord[] {
-  const db = getDatabase();
-  const rows = db
-    .prepare(`${baseSelect()} ORDER BY documents.created_at DESC`)
-    .all() as DocumentRow[];
+export async function listDocuments(): Promise<DocumentRecord[]> {
+  const supabase = await createSupabaseServerComponentClient();
+  const { data, error } = await supabase
+    .from("documents")
+    .select(
+      "id, owner_user_id, document_type_id, original_name, mime_type, storage_bucket, storage_object_path, sha256, status, model_name, extracted_data, reviewed_data, raw_response, error_message, created_at, updated_at",
+    )
+    .order("created_at", { ascending: false });
 
-  return rows.map(mapRow);
+  if (error) {
+    if (error.code === "42P01") {
+      return [];
+    }
+
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as DocumentRow[];
+  const documentTypeNames = await loadDocumentTypeNameMap(rows.map((row) => row.document_type_id));
+
+  return rows.map((row) => mapRow(row, documentTypeNames.get(row.document_type_id) ?? "Unknown"));
 }
 
-export function getDocumentById(id: string): DocumentRecord | null {
-  const db = getDatabase();
-  const row = db
-    .prepare(`${baseSelect()} WHERE documents.id = ?`)
-    .get(id) as DocumentRow | undefined;
+export async function getDocumentById(id: string): Promise<DocumentRecord | null> {
+  const supabase = await createSupabaseServerComponentClient();
+  const { data, error } = await supabase
+    .from("documents")
+    .select(
+      "id, owner_user_id, document_type_id, original_name, mime_type, storage_bucket, storage_object_path, sha256, status, model_name, extracted_data, reviewed_data, raw_response, error_message, created_at, updated_at",
+    )
+    .eq("id", id)
+    .maybeSingle();
 
-  return row ? mapRow(row) : null;
+  if (error) {
+    if (error.code === "42P01") {
+      return null;
+    }
+
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const row = data as DocumentRow;
+  const documentType = await getDocumentTypeById(row.document_type_id);
+
+  return mapRow(row, documentType?.name ?? "Unknown");
 }
 
-export function createDocument(input: {
+export async function createDocument(input: {
   documentTypeId: string;
   storedFile: StoredFile;
-}): DocumentRecord {
-  const db = getDatabase();
+}): Promise<DocumentRecord> {
+  const supabase = await createSupabaseServerComponentClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Authentication required.");
+  }
+
   const id = crypto.randomUUID();
-
-  db.prepare(
-    `
-      INSERT INTO documents (
-        id,
-        document_type_id,
-        original_name,
-        mime_type,
-        file_path,
-        sha256,
-        status,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'uploaded', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `,
-  ).run(
+  const insertPayload: Database["public"]["Tables"]["documents"]["Insert"] = {
     id,
-    input.documentTypeId,
-    input.storedFile.originalName,
-    input.storedFile.mimeType,
-    input.storedFile.filePath,
-    input.storedFile.sha256,
-  );
+    owner_user_id: user.id,
+    document_type_id: input.documentTypeId,
+    original_name: input.storedFile.originalName,
+    mime_type: input.storedFile.mimeType,
+    storage_bucket: input.storedFile.bucketName,
+    storage_object_path: input.storedFile.filePath,
+    sha256: input.storedFile.sha256,
+    status: "uploaded",
+  };
 
-  const created = getDocumentById(id);
+  const { error } = await supabase.from("documents").insert(insertPayload as never);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const created = await getDocumentById(id);
 
   if (!created) {
     throw new Error("Document was not created.");
@@ -135,142 +153,171 @@ export function createDocument(input: {
   return created;
 }
 
-export function deleteDocument(id: string): DocumentRecord | null {
-  const existing = getDocumentById(id);
+export async function deleteDocument(id: string): Promise<DocumentRecord | null> {
+  const existing = await getDocumentById(id);
 
   if (!existing) {
     return null;
   }
 
-  const db = getDatabase();
-  db.prepare("DELETE FROM documents WHERE id = ?").run(id);
+  const supabase = await createSupabaseServerComponentClient();
+  const { error } = await supabase.from("documents").delete().eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 
   return existing;
 }
 
-export function setDocumentProcessing(id: string) {
-  const db = getDatabase();
-  db.prepare(
-    `
-      UPDATE documents
-      SET status = 'processing', error_message = NULL, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `,
-  ).run(id);
+export async function setDocumentProcessing(id: string) {
+  const supabase = await createSupabaseServerComponentClient();
+  const updatePayload: Database["public"]["Tables"]["documents"]["Update"] = {
+    status: "processing",
+    error_message: null,
+  };
+  const { error } = await supabase
+    .from("documents")
+    .update(updatePayload as never)
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
-export function completeDocumentExtraction(input: {
+export async function completeDocumentExtraction(input: {
   id: string;
   extractedData: ExtractedRecord;
   rawResponse: string;
   modelName: string;
 }) {
-  const db = getDatabase();
-  db.prepare(
-    `
-      UPDATE documents
-      SET
-        status = 'extracted',
-        reviewed_data = NULL,
-        model_name = ?,
-        extracted_data = ?,
-        raw_response = ?,
-        error_message = NULL,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `,
-  ).run(
-    input.modelName,
-    JSON.stringify(input.extractedData),
-    input.rawResponse,
-    input.id,
-  );
+  const supabase = await createSupabaseServerComponentClient();
+  const updatePayload: Database["public"]["Tables"]["documents"]["Update"] = {
+    status: "extracted",
+    reviewed_data: null,
+    model_name: input.modelName,
+    extracted_data: input.extractedData,
+    raw_response: input.rawResponse,
+    error_message: null,
+  };
+  const { error } = await supabase
+    .from("documents")
+    .update(updatePayload as never)
+    .eq("id", input.id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
-export function updateDocumentReview(input: {
+export async function updateDocumentReview(input: {
   id: string;
   reviewedData: ExtractedRecord;
   status?: "reviewed" | "completed";
-}): DocumentRecord | null {
-  const db = getDatabase();
-  db.prepare(
-    `
-      UPDATE documents
-      SET
-        status = ?,
-        reviewed_data = ?,
-        error_message = NULL,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `,
-  ).run(input.status ?? "reviewed", JSON.stringify(input.reviewedData), input.id);
+}): Promise<DocumentRecord | null> {
+  const supabase = await createSupabaseServerComponentClient();
+  const updatePayload: Database["public"]["Tables"]["documents"]["Update"] = {
+    status: input.status ?? "reviewed",
+    reviewed_data: input.reviewedData,
+    error_message: null,
+  };
+  const { error } = await supabase
+    .from("documents")
+    .update(updatePayload as never)
+    .eq("id", input.id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 
   return getDocumentById(input.id);
 }
 
-export function failDocumentExtraction(id: string, errorMessage: string) {
-  const db = getDatabase();
-  db.prepare(
-    `
-      UPDATE documents
-      SET
-        status = 'failed',
-        error_message = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `,
-  ).run(errorMessage, id);
+export async function failDocumentExtraction(id: string, errorMessage: string) {
+  const supabase = await createSupabaseServerComponentClient();
+  const updatePayload: Database["public"]["Tables"]["documents"]["Update"] = {
+    status: "failed",
+    error_message: errorMessage,
+  };
+  const { error } = await supabase
+    .from("documents")
+    .update(updatePayload as never)
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
-export function failDocumentExtractionWithResponse(input: {
+export async function failDocumentExtractionWithResponse(input: {
   id: string;
   errorMessage: string;
   rawResponse?: string | null;
 }) {
-  const db = getDatabase();
-  db.prepare(
-    `
-      UPDATE documents
-      SET
-        status = 'failed',
-        error_message = ?,
-        raw_response = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `,
-  ).run(input.errorMessage, input.rawResponse ?? null, input.id);
+  const supabase = await createSupabaseServerComponentClient();
+  const updatePayload: Database["public"]["Tables"]["documents"]["Update"] = {
+    status: "failed",
+    error_message: input.errorMessage,
+    raw_response: input.rawResponse ?? null,
+  };
+  const { error } = await supabase
+    .from("documents")
+    .update(updatePayload as never)
+    .eq("id", input.id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
-export function getDashboardSummary() {
-  const db = getDatabase();
-  const counts = db
-    .prepare(
-      `
-        SELECT
-          (SELECT COUNT(*) FROM document_types) as documentTypeCount,
-          (SELECT COUNT(*) FROM documents) as documentCount,
-          (SELECT COUNT(*) FROM documents WHERE status IN ('extracted', 'reviewed', 'completed')) as extractedCount
-      `,
-    )
-    .get() as {
-      documentTypeCount: number;
-      documentCount: number;
-      extractedCount: number;
-    };
+export async function getDashboardSummary() {
+  const supabase = await createSupabaseServerComponentClient();
+  const [documentTypesResult, documentCountResult, extractedCountResult] = await Promise.all([
+    supabase.from("document_types").select("id", { count: "exact", head: true }),
+    supabase.from("documents").select("id", { count: "exact", head: true }),
+    supabase
+      .from("documents")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["extracted", "reviewed", "completed"]),
+  ]);
 
-  return counts;
+  if (documentTypesResult.error && documentTypesResult.error.code !== "42P01") {
+    throw new Error(documentTypesResult.error.message);
+  }
+
+  if (documentCountResult.error && documentCountResult.error.code !== "42P01") {
+    throw new Error(documentCountResult.error.message);
+  }
+
+  if (extractedCountResult.error && extractedCountResult.error.code !== "42P01") {
+    throw new Error(extractedCountResult.error.message);
+  }
+
+  return {
+    documentTypeCount: documentTypesResult.count ?? 0,
+    documentCount: documentCountResult.count ?? 0,
+    extractedCount: extractedCountResult.count ?? 0,
+  };
 }
 
-export function getExportRows(documentTypeId?: string) {
+export async function getExportRows(documentTypeId?: string) {
   const documents = documentTypeId
-    ? listDocuments().filter((document) => document.documentTypeId === documentTypeId)
-    : listDocuments();
+    ? (await listDocuments()).filter((document) => document.documentTypeId === documentTypeId)
+    : await listDocuments();
+
+  const documentTypes = await Promise.all(
+    Array.from(new Set(documents.map((document) => document.documentTypeId))).map(
+      async (id) => [id, await getDocumentTypeById(id)] as const,
+    ),
+  );
+  const documentTypeMap = new Map(documentTypes);
 
   return documents
     .filter((document) => document.extractedData || document.reviewedData)
     .flatMap((document) => {
       const values = document.reviewedData ?? document.extractedData ?? {};
-      const documentType = getDocumentTypeById(document.documentTypeId);
+      const documentType = documentTypeMap.get(document.documentTypeId) ?? null;
       const baseRow = {
         documentId: document.id,
         documentType: document.documentTypeName,

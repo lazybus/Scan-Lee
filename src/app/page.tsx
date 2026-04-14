@@ -1,50 +1,49 @@
 import Link from "next/link";
 
-import { getDashboardSummary } from "@/lib/documents";
-import { listDocumentTypes } from "@/lib/document-types";
+import { hasSupabaseEnv } from "@/lib/supabase/config";
+import { getCurrentUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-export default function Home() {
-  const summary = getDashboardSummary();
-  const documentTypes = listDocumentTypes();
+export default async function Home() {
+  const user = hasSupabaseEnv() ? await getCurrentUser().catch(() => null) : null;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
       <section className="paper-panel grid-rule p-8 sm:p-10">
-        <p className="data-label">Local-First Capture Stack</p>
+        <p className="data-label">Shared Templates, Private Workspaces</p>
         <h1 className="mt-5 max-w-3xl text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
-          Turn photographed cheques and invoices into structured local records.
+          Extract cheque and invoice data into a secure account-based workspace.
         </h1>
         <p className="mt-6 max-w-2xl text-base leading-8 text-[var(--muted)] sm:text-lg">
-          Scanlee keeps extraction on-device: photos live in your local file system,
-          document definitions live in SQLite, and Ollama runs the vision model on the
-          same machine. Review first, then export to CSV or XLSX.
+          Scanlee pairs local Ollama extraction with Supabase-backed accounts, private
+          uploads, and reusable document templates. Each account keeps its own documents
+          and schemas while shared starter templates remain available to duplicate.
         </p>
         <div className="mt-8 flex flex-wrap gap-4">
-          <Link className="action-button" href="/documents">
-            Start Capturing
+          <Link className="action-button" href={user ? "/dashboard" : "/register"}>
+            {user ? "Open Dashboard" : "Create Account"}
           </Link>
-          <Link className="secondary-button" href="/document-types">
-            Configure Types
+          <Link className="secondary-button" href={user ? "/documents" : "/login"}>
+            {user ? "Open Capture Queue" : "Log In"}
           </Link>
         </div>
         <div className="mt-10 grid gap-4 md:grid-cols-3">
           {[
             {
-              label: "Document Types",
-              value: summary.documentTypeCount,
-              note: "Schema versions and prompts",
+              label: "Secure Auth",
+              value: "01",
+              note: "Email/password and magic links",
             },
             {
-              label: "Stored Captures",
-              value: summary.documentCount,
-              note: "Original files remain local",
+              label: "Default Types",
+              value: "02",
+              note: "Cheque and invoice for every account",
             },
             {
-              label: "Extracted Records",
-              value: summary.extractedCount,
-              note: "Ready for export or review",
+              label: "Private Data",
+              value: "03",
+              note: "Per-user documents and templates",
             },
           ].map((item) => (
             <div
@@ -62,32 +61,45 @@ export default function Home() {
       <section className="paper-panel p-6 sm:p-8">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="data-label">Current Defaults</p>
-            <h2 className="mt-3 text-2xl font-semibold">Seeded document types</h2>
+            <p className="data-label">How It Works</p>
+            <h2 className="mt-3 text-2xl font-semibold">Structured extraction without a shared inbox</h2>
           </div>
-          <span className="status-pill" data-state="reviewed">
-            SQLite Ready
+          <span className="status-pill" data-state={user ? "reviewed" : "uploaded"}>
+            {user ? "Account Active" : "Public Entry"}
           </span>
         </div>
         <div className="mt-6 space-y-4">
-          {documentTypes.map((documentType) => (
+          {[
+            {
+              title: "Account-scoped workspaces",
+              detail:
+                "Documents, exports, and custom templates stay attached to the signed-in user instead of a shared local workspace.",
+            },
+            {
+              title: "Template sharing by duplication",
+              detail:
+                "Built-in and public templates are readable by everyone, but customization always happens in a private duplicated copy.",
+            },
+            {
+              title: "Private file storage",
+              detail:
+                "Uploaded document images live in Supabase Storage while extraction still runs against your local Ollama model.",
+            },
+          ].map((item) => (
             <article
-              key={documentType.id}
+              key={item.title}
               className="border-2 border-[var(--ink)] bg-[var(--panel-strong)] p-5"
             >
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <h3 className="text-xl font-semibold">{documentType.name}</h3>
-                  <p className="mt-1 font-mono text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
-                    {documentType.slug}
-                  </p>
+                  <h3 className="text-xl font-semibold">{item.title}</h3>
                 </div>
-                <span className="status-pill" data-state="uploaded">
-                  {documentType.fields.length} fields
+                <span className="status-pill" data-state="reviewed">
+                  Live
                 </span>
               </div>
               <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-                {documentType.description}
+                {item.detail}
               </p>
             </article>
           ))}
@@ -95,14 +107,16 @@ export default function Home() {
         <div className="divider my-6" />
         <div className="space-y-3 text-sm leading-7 text-[var(--muted)]">
           <p>
-            Configure each type with expected labels, aliases, and field kinds.
+            Create an account to unlock your private dashboard, upload queue, review flow,
+            and export tools.
           </p>
           <p>
-            Upload a photo, send it to the local vision model, review the output, and
-            export the approved dataset.
+            Start from the built-in cheque and invoice templates or publish your own schema
+            for other users to duplicate.
           </p>
         </div>
       </section>
     </div>
   );
 }
+

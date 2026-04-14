@@ -6,7 +6,10 @@ import {
   setDocumentProcessing,
 } from "@/lib/documents";
 import type { DocumentRecord } from "@/lib/domain";
-import { extractDocumentWithOllama, OllamaExtractionError } from "@/lib/ollama";
+import {
+  extractDocumentWithGoogleAi,
+  GoogleAiExtractionError,
+} from "@/lib/google-ai";
 
 export type DocumentExtractionResult = {
   documentId: string;
@@ -19,7 +22,7 @@ export type DocumentExtractionResult = {
 export async function extractStoredDocument(
   document: DocumentRecord,
 ): Promise<DocumentExtractionResult> {
-  const documentType = getDocumentTypeById(document.documentTypeId);
+  const documentType = await getDocumentTypeById(document.documentTypeId);
 
   if (!documentType) {
     return {
@@ -30,15 +33,17 @@ export async function extractStoredDocument(
     };
   }
 
-  setDocumentProcessing(document.id);
+  await setDocumentProcessing(document.id);
 
   try {
-    const result = await extractDocumentWithOllama({
+    const result = await extractDocumentWithGoogleAi({
       documentType,
       filePath: document.filePath,
+      mimeType: document.mimeType,
+      storageBucket: document.storageBucket,
     });
 
-    completeDocumentExtraction({
+    await completeDocumentExtraction({
       id: document.id,
       extractedData: result.extractedData,
       rawResponse: result.rawResponse,
@@ -47,7 +52,7 @@ export async function extractStoredDocument(
 
     return {
       documentId: document.id,
-      item: getDocumentById(document.id),
+      item: await getDocumentById(document.id),
       ok: true,
       warning:
         result.missingRequiredFields.length > 0
@@ -56,20 +61,20 @@ export async function extractStoredDocument(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Extraction failed.";
-    const rawResponse = error instanceof OllamaExtractionError ? error.rawResponse : null;
+    const rawResponse = error instanceof GoogleAiExtractionError ? error.rawResponse : null;
 
     console.error("Document extraction failed", {
       documentId: document.id,
       documentName: document.originalName,
       documentTypeId: document.documentTypeId,
       documentTypeName: documentType.name,
-      modelName: process.env.OLLAMA_MODEL ?? "gemma4:26b",
+      modelName: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
       filePath: document.filePath,
       message,
       rawResponse,
     });
 
-    failDocumentExtractionWithResponse({
+    await failDocumentExtractionWithResponse({
       id: document.id,
       errorMessage: message,
       rawResponse,
@@ -77,7 +82,7 @@ export async function extractStoredDocument(
 
     return {
       documentId: document.id,
-      item: getDocumentById(document.id),
+      item: await getDocumentById(document.id),
       ok: false,
       error: message,
     };
@@ -87,7 +92,7 @@ export async function extractStoredDocument(
 export async function extractStoredDocumentById(
   id: string,
 ): Promise<DocumentExtractionResult> {
-  const document = getDocumentById(id);
+  const document = await getDocumentById(id);
 
   if (!document) {
     return {

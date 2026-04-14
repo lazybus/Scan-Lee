@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return Response.json({ items: listDocuments() });
+  return Response.json({ items: await listDocuments() });
 }
 
 export async function POST(request: Request) {
@@ -47,14 +47,14 @@ export async function POST(request: Request) {
       return Response.json({ error: "Document type is required." }, { status: 400 });
     }
 
-    const documentType = getDocumentTypeById(documentTypeId);
+    const documentType = await getDocumentTypeById(documentTypeId);
 
     if (!documentType) {
       return Response.json({ error: "Document type was not found." }, { status: 404 });
     }
 
     const storedFile = await saveUploadedFile(file);
-    const item = createDocument({ documentTypeId, storedFile });
+    const item = await createDocument({ documentTypeId, storedFile });
 
     items.push(item);
   }

@@ -1,61 +1,80 @@
 # Scanlee
 
-Scanlee is a local-first document extraction tool for turning photographed documents into structured data using Ollama vision models. You define document types such as invoices or cheques, choose the fields you want to extract, upload one image or process documents in batches, and export the results to CSV or Excel.
-
-The full workflow runs on your machine. Scanlee does not require internet access for document processing, document images stay local, extraction is handled by your local Ollama instance, and the app stores metadata and results in a local SQLite database. That keeps sensitive document data private and under your control.
+Scanlee is a Supabase-backed document extraction app for turning photographed business documents into structured data. It gives each account a private workspace for document types, uploads, review, and exports, while supporting both local Ollama models and remote API models such as Google AI Studio.
 
 ## What It Does
 
-- Create custom document types with the fields you want to capture
-- Configure extraction for documents such as cheques, invoices, and similar business paperwork
-- Upload a single image or process multiple documents in a batch
-- Send document images to a locally running Ollama vision model
-- Process documents without sending them to external cloud services
+- Create reusable document types for invoices, cheques, and other structured paperwork
+- Store accounts, document metadata, and uploaded files in Supabase
+- Keep user-created templates private or share them as public read-only templates others can duplicate
+- Run extraction against either a local Ollama model or a remote model configured through Google AI Studio
 - Review extracted values before exporting
 - Export processed data to CSV or XLSX
 
 ## How It Works
 
-1. Create a document type and define the fields you want to extract.
-2. Upload document images and assign them to that document type.
-3. Run extraction through your configured Ollama model.
-4. Review the parsed output.
+1. Create or duplicate a document type and define the fields you want to capture.
+2. Upload document images into your account-scoped workspace.
+3. Run extraction using your configured AI provider.
+4. Review the parsed output and fix anything the model missed.
 5. Export the final structured data to CSV or Excel.
 
 ## Tech Stack
 
 - Next.js App Router
 - React
-- SQLite via better-sqlite3
-- Local filesystem storage for uploaded images
-- Ollama for local AI extraction
+- Supabase Auth, Postgres, and Storage
+- Ollama for local model inference
+- Google AI Studio for remote Gemini or Gemma-style model inference
 - CSV and XLSX export support
 
-## Ollama Configuration
+## Supabase Setup
 
-Set the following values in your `.env` file:
+Create a local `.env` file with the core Supabase settings:
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+SUPABASE_SECRET_KEY=sb_secret_...
+SUPABASE_STORAGE_BUCKET=scanlee-documents
+```
+
+- `NEXT_PUBLIC_SUPABASE_URL` is your Supabase project URL.
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` is the browser-safe key used for auth and RLS-protected requests.
+- `NEXT_PUBLIC_SITE_URL` is the base URL used for auth redirects.
+- `SUPABASE_SECRET_KEY` is the server-only key for privileged server operations.
+- `SUPABASE_STORAGE_BUCKET` is the private bucket used for document uploads.
+
+The app still accepts the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` names as fallbacks, but new setup should use the publishable and secret key names.
+
+Apply the SQL in [supabase/migrations/202604140001_initial_multi_tenant.sql](supabase/migrations/202604140001_initial_multi_tenant.sql) to your Supabase project before using the authenticated workspace flow.
+
+## AI Provider Setup
+
+Scanlee is designed to work with both local and remote model backends. Configure the provider or providers you want to use in `.env`.
+
+### Ollama
 
 ```dotenv
 OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=qwen3.5:0.8b
+OLLAMA_MODEL=gemma4:26b
 ```
 
-- `OLLAMA_BASE_URL` points to your Ollama server
-- `OLLAMA_MODEL` specifies the model Scanlee should use for extraction
+- `OLLAMA_BASE_URL` is the base URL for your local or network-accessible Ollama instance.
+- `OLLAMA_MODEL` is the model tag Scanlee should call for extraction.
 
-Make sure Ollama is running and that the selected model is already available locally.
+### Google AI Studio
 
-## Tested Models
+```dotenv
+GEMINI_API_KEY=your-ai-studio-api-key
+GEMINI_MODEL=gemini-2.5-flash
+```
 
-This project has been tested with the following Ollama models:
+- `GEMINI_API_KEY` is the server-only API key created in Google AI Studio.
+- `GEMINI_MODEL` is the remote model id Scanlee should use for extraction.
 
-- Gemma 4 E2B
-- Gemma 4 E4B
-- Gemma 4 26B MoE
-- Qwen 3.5 0.8B
-- Qwen 3.5 models up to the 35B MoE variant
-
-Current observation: Gemma 4 E2B has produced the weakest extraction results so far.
+Keep model ids configurable through `.env` so you can switch between local Ollama models and remote Gemini or Gemma variants without code changes.
 
 ## Getting Started
 
@@ -65,7 +84,7 @@ Install dependencies:
 npm install
 ```
 
-Run the development server:
+Start the development server:
 
 ```bash
 npm run dev
@@ -73,9 +92,8 @@ npm run dev
 
 Then open `http://localhost:3000`.
 
-## Local Data
+## Notes
 
-- `data/scanlee.sqlite` stores local app data and extracted results
-- `data/uploads/` stores uploaded source images
-
-The project is designed for local, self-hosted document processing with Ollama as the extraction backend.
+- Protected routes require valid Supabase environment variables and the applied SQL migration.
+- Extraction quality varies by model, so validate at least one real document and one table-heavy document type when changing providers or model ids.
+- The seeded starter templates include cheque and invoice, and additional templates can be shared by duplication without exposing a user's private workspace.

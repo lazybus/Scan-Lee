@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return Response.json({ items: listDocumentTypes() });
+  return Response.json({ items: await listDocumentTypes() });
 }
 
 export async function POST(request: Request) {
@@ -16,7 +16,9 @@ export async function POST(request: Request) {
       slug: slugify(String(payload.slug ?? payload.name ?? "")),
     });
 
-    const item = createDocumentType(parsed);
+    const item = await createDocumentType(parsed, {
+      isPublic: payload.isPublic === true,
+    });
     return Response.json({ item }, { status: 201 });
   } catch (error) {
     return Response.json(

@@ -1,3 +1,7 @@
+import { extname } from "node:path";
+
+import { GoogleGenAI, type Part } from "@google/genai";
+
 import {
   buildFieldPromptSnippet,
   getMissingRequiredFields,
@@ -8,24 +12,25 @@ import {
 } from "@/lib/domain";
 import { readStoredFileAsBase64 } from "@/lib/storage";
 
-const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
-const modelName = process.env.OLLAMA_MODEL ?? "gemma4:26b";
+const apiKey = process.env.GEMINI_API_KEY ?? "";
+const modelName = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
-type OllamaChatResponse = {
-  message?: {
-    content?: string;
-  };
-  done?: boolean;
-};
-
-export class OllamaExtractionError extends Error {
+export class GoogleAiExtractionError extends Error {
   rawResponse: string | null;
 
   constructor(message: string, rawResponse?: string | null) {
     super(message);
-    this.name = "OllamaExtractionError";
+    this.name = "GoogleAiExtractionError";
     this.rawResponse = rawResponse ?? null;
   }
+}
+
+function createClient() {
+  if (!apiKey) {
+    throw new GoogleAiExtractionError("GEMINI_API_KEY is not configured.");
+  }
+
+  return new GoogleGenAI({ apiKey });
 }
 
 function stripJsonCodeFence(input: string): string {
@@ -66,51 +71,96 @@ function buildProductsFallbackPrompt(field: TableFieldDefinition): string {
     `Extract only the ${field.label} table field from this document image.`,
     "Return one JSON object only.",
     "Do not wrap the JSON in markdown.",
-    `Return this exact shape: {"${field.key}": []} when no rows are present.`,
+    `Return this exact shape: {\"${field.key}\": []} when no rows are present.`,
     `Each item in ${field.key} must be one complete row object from the repeating table.`,
     "Use the exact keys below for every row object:",
     columnSnippet,
   ].join("\n\n");
 }
 
-export async function getOllamaStatus() {
-  try {
-    const response = await fetch(`${baseUrl}/api/tags`, {
-      method: "GET",
-      cache: "no-store",
-    });
+function inferMimeType(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".webp":
+      return "image/webp";
+    case ".gif":
+      return "image/gif";
+    case ".pdf":
+      return "application/pdf";
+    default:
+      return "application/octet-stream";
+  }
+}
 
-    if (!response.ok) {
-      return {
-        connected: false,
-        modelName,
-        reason: `HTTP ${response.status}`,
-      };
-    }
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
 
-    const data = (await response.json()) as {
-      models?: Array<{ name?: string }>;
+  return "Unknown Google AI error.";
+}
+
+function getErrorStatus(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+
+  const maybeStatus = (error as { status?: unknown }).status;
+  return typeof maybeStatus === "number" ? maybeStatus : null;
+}
+
+function classifyStatusError(error: unknown) {
+  const message = getErrorMessage(error);
+  const status = getErrorStatus(error);
+  const isMissingModel =
+    status === 404 || /model/i.test(message) && /not found|unsupported|unknown/i.test(message);
+
+  if (isMissingModel) {
+    return {
+      connected: true,
+      modelName,
+      available: false,
+      reason: message,
     };
-    const availableModels = data.models?.map((model) => model.name).filter(Boolean) ?? [];
+  }
+
+  return {
+    connected: false,
+    modelName,
+    reason: message,
+  };
+}
+
+export async function getGoogleAiStatus() {
+  try {
+    const client = createClient();
+    await client.models.generateContent({
+      model: modelName,
+      contents: "Reply with the word ok.",
+      config: {
+        temperature: 0,
+        maxOutputTokens: 8,
+      },
+    });
 
     return {
       connected: true,
       modelName,
-      available: availableModels.includes(modelName),
-      availableModels,
+      available: true,
     };
   } catch (error) {
-    return {
-      connected: false,
-      modelName,
-      reason: error instanceof Error ? error.message : "Unknown connection error.",
-    };
+    return classifyStatusError(error);
   }
 }
 
-export async function extractDocumentWithOllama(input: {
+export async function extractDocumentWithGoogleAi(input: {
   documentType: DocumentType;
   filePath: string;
+  mimeType?: string;
   storageBucket?: string;
 }): Promise<{
   extractedData: ExtractedRecord;
@@ -119,34 +169,22 @@ export async function extractDocumentWithOllama(input: {
   missingRequiredFields: string[];
 }> {
   const imageBase64 = await readStoredFileAsBase64(input.filePath, input.storageBucket);
+  const rawMimeType = input.mimeType?.trim();
+  const mimeType = rawMimeType && rawMimeType.length > 0 ? rawMimeType : inferMimeType(input.filePath);
   const systemPrompt =
     "You extract structured business document data from images. Return JSON only.";
   const userPrompt = buildPrompt(input.documentType);
 
- /* console.info(
-    [
-      "[ollama] Extraction request",
-      `model=${modelName}`,
-      `documentType=${input.documentType.name}`,
-      "system prompt >>>",
-      systemPrompt,
-      "<<< system prompt",
-      "user prompt >>>",
-      userPrompt,
-      "<<< user prompt",
-      `image bytes(base64)=${imageBase64.length}`,
-    ].join("\n"),
-  ); */
-
-  const rawResponse = await requestOllamaJsonResponse({
+  const rawResponse = await requestGoogleAiJsonResponse({
     imageBase64,
+    mimeType,
     systemPrompt,
     userPrompt,
   });
 
   console.info(
     [
-      "[ollama] Extraction response",
+      "[google-ai] Extraction response",
       `model=${modelName}`,
       "json >>>",
       rawResponse,
@@ -154,7 +192,7 @@ export async function extractDocumentWithOllama(input: {
     ].join("\n"),
   );
 
-  const parsed = parseOllamaJsonObject(rawResponse);
+  const parsed = parseGoogleAiJsonObject(rawResponse);
   const fallbackResponses: Record<string, unknown> = {};
 
   for (const field of input.documentType.fields) {
@@ -166,12 +204,13 @@ export async function extractDocumentWithOllama(input: {
       continue;
     }
 
-    const fallbackResponse = await requestOllamaJsonResponse({
+    const fallbackResponse = await requestGoogleAiJsonResponse({
       imageBase64,
+      mimeType,
       systemPrompt,
       userPrompt: buildProductsFallbackPrompt(field),
     });
-    const fallbackParsed = parseOllamaJsonObject(fallbackResponse);
+    const fallbackParsed = parseGoogleAiJsonObject(fallbackResponse);
 
     if (Array.isArray(fallbackParsed[field.key])) {
       parsed[field.key] = fallbackParsed[field.key];
@@ -199,60 +238,52 @@ export async function extractDocumentWithOllama(input: {
   };
 }
 
-async function requestOllamaJsonResponse(input: {
+async function requestGoogleAiJsonResponse(input: {
   imageBase64: string;
+  mimeType: string;
   systemPrompt: string;
   userPrompt: string;
 }) {
-  const response = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    cache: "no-store",
-    body: JSON.stringify({
-      model: modelName,
-      stream: false,
-      format: "json",
-      messages: [
-        {
-          role: "system",
-          content: input.systemPrompt,
-        },
-        {
-          role: "user",
-          content: input.userPrompt,
-          images: [input.imageBase64],
-        },
-      ],
-      options: {
-        temperature: 0.1,
+  try {
+    const client = createClient();
+    const imagePart: Part = {
+      inlineData: {
+        data: input.imageBase64,
+        mimeType: input.mimeType,
       },
-    }),
-  });
+    };
+    const response = await client.models.generateContent({
+      model: modelName,
+      contents: [imagePart, input.userPrompt],
+      config: {
+        systemInstruction: input.systemPrompt,
+        temperature: 0.1,
+        responseMimeType: "application/json",
+      },
+    });
+    const rawResponse = response.text?.trim();
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new OllamaExtractionError(
-      `Ollama request failed: ${response.status} ${text}`,
-      text,
+    if (!rawResponse) {
+      throw new GoogleAiExtractionError(
+        "Google AI returned an empty response.",
+        JSON.stringify(response),
+      );
+    }
+
+    return rawResponse;
+  } catch (error) {
+    if (error instanceof GoogleAiExtractionError) {
+      throw error;
+    }
+
+    throw new GoogleAiExtractionError(
+      `Google AI request failed: ${getErrorMessage(error)}`,
+      getErrorMessage(error),
     );
   }
-
-  const payload = (await response.json()) as OllamaChatResponse;
-  const rawResponse = payload.message?.content?.trim();
-
-  if (!rawResponse) {
-    throw new OllamaExtractionError(
-      "Ollama returned an empty response.",
-      JSON.stringify(payload),
-    );
-  }
-
-  return rawResponse;
 }
 
-function parseOllamaJsonObject(rawResponse: string) {
+function parseGoogleAiJsonObject(rawResponse: string) {
   const sanitizedResponse = stripJsonCodeFence(rawResponse);
 
   try {
@@ -265,8 +296,8 @@ function parseOllamaJsonObject(rawResponse: string) {
     return parsed as Record<string, unknown>;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown JSON parse error.";
-    throw new OllamaExtractionError(
-      `Ollama returned invalid JSON: ${detail}. Response: ${summarizeResponseSnippet(sanitizedResponse)}`,
+    throw new GoogleAiExtractionError(
+      `Google AI returned invalid JSON: ${detail}. Response: ${summarizeResponseSnippet(sanitizedResponse)}`,
       rawResponse,
     );
   }
