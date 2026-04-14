@@ -3,6 +3,7 @@
 import {
   faChevronDown,
   faChevronUp,
+  faExpand,
   faList,
   faPlus,
   faTableColumns,
@@ -199,6 +200,8 @@ export function DocumentTypeEditor({
   const [columnLayoutModes, setColumnLayoutModes] = useState<Record<string, ColumnLayoutMode>>({});
   const [expandedFieldIds, setExpandedFieldIds] = useState<Set<string>>(() => new Set());
   const [expandedColumnIds, setExpandedColumnIds] = useState<Set<string>>(() => new Set());
+  const [fullWidthFieldId, setFullWidthFieldId] = useState<string | null>(null);
+  const [fullWidthColumnIds, setFullWidthColumnIds] = useState<Record<string, string | null>>({});
   const isEditing = editingDocumentTypeId !== null;
   const suggestedSlug = useMemo(() => slugify(name), [name]);
 
@@ -213,6 +216,8 @@ export function DocumentTypeEditor({
     setColumnLayoutModes({});
     setExpandedFieldIds(new Set());
     setExpandedColumnIds(new Set());
+    setFullWidthFieldId(null);
+    setFullWidthColumnIds({});
     setMessage(null);
     setError(null);
     setActiveReorder(null);
@@ -358,6 +363,16 @@ export function DocumentTypeEditor({
       delete nextModes[id];
       return nextModes;
     });
+    setFullWidthColumnIds((currentIds) => {
+      if (!(id in currentIds)) {
+        return currentIds;
+      }
+
+      const nextIds = { ...currentIds };
+      delete nextIds[id];
+      return nextIds;
+    });
+    setFullWidthFieldId((currentFieldId) => (currentFieldId === id ? null : currentFieldId));
     if (!removedField) {
       return;
     }
@@ -387,6 +402,19 @@ export function DocumentTypeEditor({
     });
   }
 
+  function toggleFieldFullWidth(id: string) {
+    setFullWidthFieldId((currentFieldId) => (currentFieldId === id ? null : id));
+    setExpandedFieldIds((currentExpandedIds) => {
+      if (currentExpandedIds.has(id)) {
+        return currentExpandedIds;
+      }
+
+      const nextExpandedIds = new Set(currentExpandedIds);
+      nextExpandedIds.add(id);
+      return nextExpandedIds;
+    });
+  }
+
   function toggleProductColumnExpanded(columnId: string) {
     setExpandedColumnIds((currentExpandedIds) => {
       const nextExpandedIds = new Set(currentExpandedIds);
@@ -397,6 +425,22 @@ export function DocumentTypeEditor({
         nextExpandedIds.add(columnId);
       }
 
+      return nextExpandedIds;
+    });
+  }
+
+  function toggleProductColumnFullWidth(fieldId: string, columnId: string) {
+    setFullWidthColumnIds((currentIds) => ({
+      ...currentIds,
+      [fieldId]: currentIds[fieldId] === columnId ? null : columnId,
+    }));
+    setExpandedColumnIds((currentExpandedIds) => {
+      if (currentExpandedIds.has(columnId)) {
+        return currentExpandedIds;
+      }
+
+      const nextExpandedIds = new Set(currentExpandedIds);
+      nextExpandedIds.add(columnId);
       return nextExpandedIds;
     });
   }
@@ -456,6 +500,16 @@ export function DocumentTypeEditor({
       nextExpandedIds.delete(columnId);
       return nextExpandedIds;
     });
+    setFullWidthColumnIds((currentIds) => {
+      if (currentIds[fieldId] !== columnId) {
+        return currentIds;
+      }
+
+      return {
+        ...currentIds,
+        [fieldId]: null,
+      };
+    });
   }
 
   function beginFieldReorder(
@@ -494,6 +548,8 @@ export function DocumentTypeEditor({
     setColumnLayoutModes({});
     setExpandedFieldIds(new Set());
     setExpandedColumnIds(new Set());
+    setFullWidthFieldId(null);
+    setFullWidthColumnIds({});
     setMessage(null);
     setError(null);
     setActiveReorder(null);
@@ -706,9 +762,12 @@ export function DocumentTypeEditor({
               const contentId = `field-panel-${field.id}`;
 
               return (
-                <div key={field.id} className="relative">
+                <div
+                  key={field.id}
+                  className={`relative ${fieldLayoutMode === "double" && fullWidthFieldId === field.id ? "xl:col-span-2" : ""}`}
+                >
                   <div
-                    className={`relative border-2 bg-[var(--panel-strong)] p-4 pl-16 transition-[border-color,opacity,transform] ${
+                    className={`relative border-2 bg-[var(--panel-strong)] p-4 transition-[border-color,opacity,transform] ${
                       dropTarget?.scope === "form" && dropTarget.itemId === field.id
                         ? "border-[var(--accent-strong)]"
                         : "border-[var(--ink)]"
@@ -721,64 +780,87 @@ export function DocumentTypeEditor({
                     data-reorder-scope="form"
                     data-reorder-target="true"
                   >
-                    <button
-                      aria-label={`Drag ${fieldTitle}`}
-                      className="field-drag-handle"
-                      onPointerDown={(event) => {
-                        event.preventDefault();
-                        beginFieldReorder(field.id, {
-                          title: fieldTitle,
-                          subtitle: `${field.kind.toUpperCase()} · ${field.key || "new field"}`,
-                          x: event.clientX,
-                          y: event.clientY,
-                        });
-                      }}
-                      type="button"
-                    >
-                      <span className="field-drag-handle__bars" aria-hidden="true">
-                        <span />
-                        <span />
-                        <span />
-                      </span>
-                    </button>
-                    {dropTarget?.scope === "form" && dropTarget.itemId === field.id ? (
-                      <span className="reorder-drop-indicator" aria-hidden="true" />
-                    ) : null}
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="relative min-h-[4.5rem] pl-16">
                       <button
-                        aria-controls={contentId}
-                        aria-expanded={isExpanded}
-                        className="flex min-w-0 flex-1 items-start justify-between gap-3 border-2 border-[var(--line)] px-3 py-2 text-left transition hover:border-[var(--ink)]"
-                        onClick={() => toggleFieldExpanded(field.id)}
+                        aria-label={`Drag ${fieldTitle}`}
+                        className="field-drag-handle"
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          beginFieldReorder(field.id, {
+                            title: fieldTitle,
+                            subtitle: `${field.kind.toUpperCase()} · ${field.key || "new field"}`,
+                            x: event.clientX,
+                            y: event.clientY,
+                          });
+                        }}
                         type="button"
                       >
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium uppercase tracking-[0.14em]">
-                            {fieldTitle}
-                          </span>
-                          <span className="mt-1 block font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
-                            {field.kind}
-                          </span>
-                        </span>
-                        <span className="mt-0.5 shrink-0 text-[var(--ink)]">
-                          <FontAwesomeIcon
-                            aria-hidden="true"
-                            icon={isExpanded ? faChevronUp : faChevronDown}
-                          />
+                        <span className="field-drag-handle__bars" aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
                         </span>
                       </button>
-                      {fields.length > 1 ? (
-                        <button
-                          aria-label={`Remove ${fieldTitle}`}
-                          className="danger-button inline-flex h-11 w-11 items-center justify-center px-0 py-0"
-                          type="button"
-                          onClick={() => removeField(field.id)}
-                        >
-                          <FontAwesomeIcon aria-hidden="true" icon={faTrashCan} />
-                        </button>
+                      {dropTarget?.scope === "form" && dropTarget.itemId === field.id ? (
+                        <span className="reorder-drop-indicator" aria-hidden="true" />
                       ) : null}
+                      <div className="flex items-start justify-between gap-3">
+                        <button
+                          aria-controls={contentId}
+                          aria-expanded={isExpanded}
+                          className="flex min-w-0 flex-1 items-start justify-between gap-3 py-1 pr-1 text-left transition hover:text-[var(--paper)]"
+                          onClick={() => toggleFieldExpanded(field.id)}
+                          type="button"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium uppercase tracking-[0.14em]">
+                              {fieldTitle}
+                            </span>
+                            <span className="mt-1 block font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
+                              {field.kind}
+                            </span>
+                          </span>
+                          <span className="mt-0.5 shrink-0 text-[var(--ink)]">
+                            <FontAwesomeIcon
+                              aria-hidden="true"
+                              icon={isExpanded ? faChevronUp : faChevronDown}
+                            />
+                          </span>
+                        </button>
+                      </div>
                     </div>
                     <div id={contentId} className="mt-4 space-y-3" hidden={!isExpanded}>
+                      <div className="divider" aria-hidden="true" />
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <button
+                          aria-label={
+                            fullWidthFieldId === field.id
+                              ? `Restore ${fieldTitle} to grid width`
+                              : `Make ${fieldTitle} full width`
+                          }
+                          aria-pressed={fullWidthFieldId === field.id}
+                          className={`inline-flex h-11 w-11 items-center justify-center border-2 px-0 py-0 transition ${
+                            fullWidthFieldId === field.id
+                              ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--canvas)]"
+                              : "border-[var(--line)] bg-transparent text-[var(--ink)] hover:border-[var(--ink)]"
+                          }`}
+                          onClick={() => toggleFieldFullWidth(field.id)}
+                          title={fullWidthFieldId === field.id ? "Restore grid width" : "Make full width"}
+                          type="button"
+                        >
+                          <FontAwesomeIcon aria-hidden="true" icon={faExpand} />
+                        </button>
+                        {fields.length > 1 ? (
+                          <button
+                            aria-label={`Remove ${fieldTitle}`}
+                            className="danger-button inline-flex h-11 w-11 items-center justify-center px-0 py-0"
+                            type="button"
+                            onClick={() => removeField(field.id)}
+                          >
+                            <FontAwesomeIcon aria-hidden="true" icon={faTrashCan} />
+                          </button>
+                        ) : null}
+                      </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="block space-y-2">
                           <span className="data-label">Key</span>
@@ -871,6 +953,24 @@ export function DocumentTypeEditor({
                               </p>
                             </div>
                             <div className="flex flex-wrap items-center justify-end gap-3">
+                              <button
+                                aria-label={
+                                  fullWidthFieldId === field.id
+                                    ? `Restore ${fieldTitle} to grid width`
+                                    : `Make ${fieldTitle} full width`
+                                }
+                                aria-pressed={fullWidthFieldId === field.id}
+                                className={`inline-flex h-11 w-11 items-center justify-center border-2 px-0 py-0 transition ${
+                                  fullWidthFieldId === field.id
+                                    ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--canvas)]"
+                                    : "border-[var(--line)] bg-transparent text-[var(--ink)] hover:border-[var(--ink)]"
+                                }`}
+                                onClick={() => toggleFieldFullWidth(field.id)}
+                                title={fullWidthFieldId === field.id ? "Restore grid width" : "Make full width"}
+                                type="button"
+                              >
+                                <FontAwesomeIcon aria-hidden="true" icon={faExpand} />
+                              </button>
                               <div
                                 aria-label={`Column layout for ${fieldTitle}`}
                                 className="inline-flex overflow-hidden border-2 border-[var(--line)]"
@@ -933,8 +1033,14 @@ export function DocumentTypeEditor({
                             {field.columns.map((column, columnIndex) => {
                               const columnTitle = getColumnDisplayLabel(column, columnIndex);
                               const columnContentId = `field-${field.id}-column-${column.id}`;
+                              const columnLayoutMode = columnLayoutModes[field.id] ?? "double";
+                              const columnFormGridClass =
+                                columnLayoutMode === "double"
+                                  ? "grid gap-3 grid-cols-1"
+                                  : "grid gap-3 sm:grid-cols-2";
                               const isColumnExpanded = expandedColumnIds.has(column.id);
                               const columnReorderScope = buildColumnReorderScope(field.id);
+                              const isColumnFullWidth = fullWidthColumnIds[field.id] === column.id;
                               const isColumnDropTarget =
                                 dropTarget?.scope === columnReorderScope &&
                                 dropTarget.itemId === column.id;
@@ -945,10 +1051,10 @@ export function DocumentTypeEditor({
                               return (
                                 <div
                                   key={column.id}
-                                  className="relative"
+                                  className={`relative ${columnLayoutMode === "double" && isColumnFullWidth ? "xl:col-span-2" : ""}`}
                                 >
                                   <div
-                                    className={`relative space-y-3 border bg-[var(--panel)] p-4 pl-16 transition-[border-color,opacity,transform] ${
+                                    className={`relative space-y-3 border bg-[var(--panel)] p-4 transition-[border-color,opacity,transform] ${
                                       isColumnDropTarget
                                         ? "border-[var(--accent-strong)]"
                                         : "border-[color:var(--line)]"
@@ -957,68 +1063,91 @@ export function DocumentTypeEditor({
                                     data-reorder-scope={columnReorderScope}
                                     data-reorder-target="true"
                                   >
-                                    <button
-                                      aria-label={`Drag ${columnTitle}`}
-                                      className="field-drag-handle"
-                                      onPointerDown={(event) => {
-                                        event.preventDefault();
-                                        beginColumnReorder(field.id, column.id, {
-                                          title: columnTitle,
-                                          subtitle: `${column.kind.toUpperCase()} · ${column.key || "new column"}`,
-                                          x: event.clientX,
-                                          y: event.clientY,
-                                        });
-                                      }}
-                                      type="button"
-                                    >
-                                      <span className="field-drag-handle__bars" aria-hidden="true">
-                                        <span />
-                                        <span />
-                                        <span />
-                                      </span>
-                                    </button>
-                                    {isColumnDropTarget ? (
-                                      <span className="reorder-drop-indicator" aria-hidden="true" />
-                                    ) : null}
-                                    <div className="flex items-start justify-between gap-3">
-                                    <button
-                                      aria-controls={columnContentId}
-                                      aria-expanded={isColumnExpanded}
-                                      className="flex min-w-0 flex-1 items-start justify-between gap-3 border border-[color:var(--line)] px-3 py-2 text-left transition hover:border-[var(--ink)]"
-                                      onClick={() => toggleProductColumnExpanded(column.id)}
-                                      type="button"
-                                    >
-                                      <span className="min-w-0">
-                                        <span className="block truncate font-medium uppercase tracking-[0.14em]">
-                                          {columnTitle}
-                                        </span>
-                                        <span className="mt-1 block font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
-                                          {column.kind}
-                                        </span>
-                                      </span>
-                                      <span className="mt-0.5 shrink-0 text-[var(--ink)]">
-                                        <FontAwesomeIcon
-                                          aria-hidden="true"
-                                          icon={isColumnExpanded ? faChevronUp : faChevronDown}
-                                        />
-                                      </span>
-                                    </button>
-                                    {field.columns.length > 1 ? (
+                                    <div className="relative min-h-[4.5rem] pl-16">
                                       <button
-                                        aria-label={`Remove ${columnTitle}`}
-                                        className="danger-button inline-flex h-11 w-11 items-center justify-center px-0 py-0"
+                                        aria-label={`Drag ${columnTitle}`}
+                                        className="field-drag-handle"
+                                        onPointerDown={(event) => {
+                                          event.preventDefault();
+                                          beginColumnReorder(field.id, column.id, {
+                                            title: columnTitle,
+                                            subtitle: `${column.kind.toUpperCase()} · ${column.key || "new column"}`,
+                                            x: event.clientX,
+                                            y: event.clientY,
+                                          });
+                                        }}
                                         type="button"
-                                        onClick={() => removeProductColumn(field.id, column.id)}
                                       >
-                                        <FontAwesomeIcon aria-hidden="true" icon={faTrashCan} />
+                                        <span className="field-drag-handle__bars" aria-hidden="true">
+                                          <span />
+                                          <span />
+                                          <span />
+                                        </span>
                                       </button>
-                                    ) : null}
+                                      {isColumnDropTarget ? (
+                                        <span className="reorder-drop-indicator" aria-hidden="true" />
+                                      ) : null}
+                                      <div className="flex items-start justify-between gap-3">
+                                        <button
+                                          aria-controls={columnContentId}
+                                          aria-expanded={isColumnExpanded}
+                                          className="flex min-w-0 flex-1 items-start justify-between gap-3 py-1 pr-1 text-left transition hover:text-[var(--paper)]"
+                                          onClick={() => toggleProductColumnExpanded(column.id)}
+                                          type="button"
+                                        >
+                                          <span className="min-w-0">
+                                            <span className="block truncate font-medium uppercase tracking-[0.14em]">
+                                              {columnTitle}
+                                            </span>
+                                            <span className="mt-1 block font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
+                                              {column.kind}
+                                            </span>
+                                          </span>
+                                          <span className="mt-0.5 shrink-0 text-[var(--ink)]">
+                                            <FontAwesomeIcon
+                                              aria-hidden="true"
+                                              icon={isColumnExpanded ? faChevronUp : faChevronDown}
+                                            />
+                                          </span>
+                                        </button>
+                                      </div>
                                     </div>
 
                                     <div id={columnContentId} className="space-y-3" hidden={!isColumnExpanded}>
-                                    <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className="divider" aria-hidden="true" />
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                      <button
+                                        aria-label={
+                                          isColumnFullWidth
+                                            ? `Restore ${columnTitle} to grid width`
+                                            : `Make ${columnTitle} full width`
+                                        }
+                                        aria-pressed={isColumnFullWidth}
+                                        className={`inline-flex h-11 w-11 items-center justify-center border-2 px-0 py-0 transition ${
+                                          isColumnFullWidth
+                                            ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--canvas)]"
+                                            : "border-[var(--line)] bg-transparent text-[var(--ink)] hover:border-[var(--ink)]"
+                                        }`}
+                                        onClick={() => toggleProductColumnFullWidth(field.id, column.id)}
+                                        title={isColumnFullWidth ? "Restore grid width" : "Make full width"}
+                                        type="button"
+                                      >
+                                        <FontAwesomeIcon aria-hidden="true" icon={faExpand} />
+                                      </button>
+                                      {field.columns.length > 1 ? (
+                                        <button
+                                          aria-label={`Remove ${columnTitle}`}
+                                          className="danger-button inline-flex h-11 w-11 items-center justify-center px-0 py-0"
+                                          type="button"
+                                          onClick={() => removeProductColumn(field.id, column.id)}
+                                        >
+                                          <FontAwesomeIcon aria-hidden="true" icon={faTrashCan} />
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                    <div className={columnFormGridClass}>
                                       <label className="block space-y-2">
-                                        <span className="data-label">Column Key</span>
+                                        <span className="data-label">Key</span>
                                         <input
                                           className="input-base font-mono"
                                           value={column.key}
@@ -1031,7 +1160,7 @@ export function DocumentTypeEditor({
                                         />
                                       </label>
                                       <label className="block space-y-2">
-                                        <span className="data-label">Column Label</span>
+                                        <span className="data-label">Label</span>
                                         <input
                                           className="input-base"
                                           value={column.label}
@@ -1045,9 +1174,9 @@ export function DocumentTypeEditor({
                                       </label>
                                     </div>
 
-                                    <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className={columnFormGridClass}>
                                       <label className="block space-y-2">
-                                        <span className="data-label">Column Kind</span>
+                                        <span className="data-label">Type</span>
                                         <select
                                           className="select-base"
                                           value={column.kind}
@@ -1076,13 +1205,13 @@ export function DocumentTypeEditor({
                                           type="checkbox"
                                         />
                                         <span className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--ink)]">
-                                          Required column
+                                          Required?
                                         </span>
                                       </label>
                                     </div>
 
                                     <label className="block space-y-2">
-                                      <span className="data-label">Column Aliases</span>
+                                      <span className="data-label">Aliases</span>
                                       <input
                                         className="input-base"
                                         value={column.aliases}
@@ -1096,7 +1225,7 @@ export function DocumentTypeEditor({
                                     </label>
 
                                     <label className="block space-y-2">
-                                      <span className="data-label">Column Description</span>
+                                      <span className="data-label">Description</span>
                                       <textarea
                                         className="textarea-base"
                                         value={column.description}
