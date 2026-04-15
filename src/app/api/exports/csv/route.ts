@@ -7,8 +7,14 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const batchId = searchParams.get("batchId") ?? undefined;
   const documentTypeId = searchParams.get("documentTypeId") ?? undefined;
-  const rows = await getExportRows(documentTypeId);
+
+  if (!batchId) {
+    return Response.json({ error: "A batchId query parameter is required." }, { status: 400 });
+  }
+
+  const rows = await getExportRows({ batchId, documentTypeId });
 
   if (rows.length === 0) {
     return Response.json({ error: "No extracted rows are available for export." }, { status: 404 });
@@ -20,7 +26,7 @@ export async function GET(request: Request) {
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": 'attachment; filename="scanlee-export.csv"',
+      "Content-Disposition": 'attachment; filename="scanlee-batch-export.csv"',
     },
   });
 }

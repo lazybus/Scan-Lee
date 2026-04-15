@@ -15,13 +15,13 @@ export default async function DashboardPage() {
           Welcome back{user.email ? `, ${user.email}` : ""}.
         </h1>
         <p className="mt-6 max-w-2xl text-base leading-8 text-[var(--muted)] sm:text-lg">
-          This dashboard is the entry point for your document queue, extraction reviews,
+          This dashboard is the entry point for your image batches, extraction reviews,
           exports, and reusable templates. Your workspace stays scoped to your account,
           while public and built-in templates remain available as read-only starting points.
         </p>
         <div className="mt-8 flex flex-wrap gap-4">
-          <Link className="action-button" href="/documents">
-            Open Documents
+          <Link className="action-button" href="/batches">
+            Open Batches
           </Link>
           <Link className="secondary-button" href="/document-types">
             Manage Document Types
@@ -36,9 +36,9 @@ export default async function DashboardPage() {
         </div>
         <div className="mt-6 space-y-4">
           {[
-            "Upload document images into your private capture queue and run extraction through Ollama.",
+            "Create image batches for each project or date range, then upload documents into the right batch.",
+            "Run extraction and review only within the batch you are actively working on.",
             "Create private templates or publish reusable schemas that other users can duplicate.",
-            "Review extracted values before export and keep your saved field order aligned with your workflow.",
             "Use the built-in cheque and invoice defaults when you need a starting point immediately.",
           ].map((item) => (
             <article key={item} className="border-2 border-[var(--ink)] bg-[var(--panel-strong)] p-5">

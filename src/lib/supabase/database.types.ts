@@ -50,10 +50,40 @@ export type Database = {
           updated_at?: string;
         };
       };
+      image_batches: {
+        Row: {
+          id: string;
+          owner_user_id: string;
+          name: string;
+          description: string;
+          status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_user_id: string;
+          name: string;
+          description?: string;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_user_id?: string;
+          name?: string;
+          description?: string;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       documents: {
         Row: {
           id: string;
           owner_user_id: string;
+          image_batch_id: string;
           document_type_id: string;
           original_name: string;
           mime_type: string;
@@ -72,6 +102,7 @@ export type Database = {
         Insert: {
           id?: string;
           owner_user_id: string;
+          image_batch_id: string;
           document_type_id: string;
           original_name: string;
           mime_type: string;
@@ -90,6 +121,7 @@ export type Database = {
         Update: {
           id?: string;
           owner_user_id?: string;
+          image_batch_id?: string;
           document_type_id?: string;
           original_name?: string;
           mime_type?: string;

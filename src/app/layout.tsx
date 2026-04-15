@@ -25,16 +25,6 @@ export const metadata: Metadata = {
   description: "Secure document extraction with Supabase, personal workspaces, and Ollama.",
 };
 
-const themeInitializationScript = `(() => {
-  try {
-    const storageKey = "scanlee-theme";
-    const storedTheme = window.localStorage.getItem(storageKey);
-    document.documentElement.dataset.theme = storedTheme === "light" ? "light" : "dark";
-  } catch {
-    document.documentElement.dataset.theme = "dark";
-  }
-})();`;
-
 export default async function RootLayout({
   children,
 }: Readonly<{
@@ -49,9 +39,6 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={`${displaySans.variable} ${plexMono.variable} h-full antialiased`}
     >
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitializationScript }} />
-      </head>
       <body className="min-h-full bg-[var(--canvas)] text-[var(--ink)]">
         <div className="relative min-h-screen overflow-x-hidden">
           <div className="app-backdrop pointer-events-none absolute inset-0" />
@@ -81,7 +68,7 @@ export default async function RootLayout({
                           <Link className="nav-chip" href="/document-types">
                             Document Types
                           </Link>
-                          <Link className="nav-chip" href="/documents">
+                          <Link className="nav-chip" href="/batches">
                             Capture + Review
                           </Link>
                         </>
@@ -118,7 +105,7 @@ export default async function RootLayout({
                 </div>
                 <div>
                   <p className="max-w-xl font-mono text-xs uppercase tracking-[0.22em] text-[var(--muted)]">
-                    Capture documents, validate structured records, and keep workspace access scoped to each authenticated user.
+                    Capture documents into image batches, validate structured records, and keep workspace access scoped to each authenticated user.
                   </p>
                 </div>
               </div>

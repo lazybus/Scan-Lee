@@ -19,6 +19,8 @@ export const extractionStatusValues = [
   "failed",
 ] as const;
 
+export const batchStatusValues = ["draft", "active", "completed"] as const;
+
 const baseFieldDefinitionSchema = z.object({
   key: z
     .string()
@@ -75,6 +77,21 @@ export const documentTypeSchema = documentTypeInputSchema.extend({
   updatedAt: z.string(),
 });
 
+export const imageBatchInputSchema = z.object({
+  name: z.string().trim().min(2),
+  description: z.string().trim().max(500).default(""),
+  status: z.enum(batchStatusValues).default("draft"),
+});
+
+export const imageBatchRecordSchema = imageBatchInputSchema.extend({
+  id: z.string(),
+  ownerUserId: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  documentCount: z.number().int().nonnegative().optional(),
+  processedDocumentCount: z.number().int().nonnegative().optional(),
+});
+
 export type ExtractedValue =
   | string
   | number
@@ -104,6 +121,7 @@ export const extractedRecordSchema: z.ZodType<ExtractedRecord> = z.record(
 export const documentRecordSchema = z.object({
   id: z.string(),
   ownerUserId: z.string().optional(),
+  imageBatchId: z.string(),
   documentTypeId: z.string(),
   documentTypeName: z.string(),
   originalName: z.string(),
@@ -125,8 +143,11 @@ export type FieldDefinition = z.infer<typeof fieldDefinitionSchema>;
 export type ProductColumnDefinition = z.infer<typeof productColumnDefinitionSchema>;
 export type DocumentTypeInput = z.infer<typeof documentTypeInputSchema>;
 export type DocumentType = z.infer<typeof documentTypeSchema>;
+export type ImageBatchInput = z.infer<typeof imageBatchInputSchema>;
+export type ImageBatchRecord = z.infer<typeof imageBatchRecordSchema>;
 export type ScalarFieldKind = (typeof scalarFieldKindValues)[number];
 export type ExtractionStatus = (typeof extractionStatusValues)[number];
+export type BatchStatus = (typeof batchStatusValues)[number];
 export type DocumentRecord = z.infer<typeof documentRecordSchema>;
 
 export type TableFieldDefinition = Extract<FieldDefinition, { kind: "table" }>;

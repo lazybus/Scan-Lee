@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
@@ -16,13 +16,28 @@ export async function GET(
   }
 
   try {
+    const etag = `"${document.sha256}"`;
+
+    if (request.headers.get("if-none-match") === etag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          "Cache-Control": "private, max-age=31536000, immutable",
+          ETag: etag,
+          Vary: "Cookie",
+        },
+      });
+    }
+
     const buffer = await readStoredFileBuffer(document.filePath, document.storageBucket);
 
     return new Response(new Uint8Array(buffer), {
       headers: {
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, max-age=31536000, immutable",
         "Content-Disposition": `inline; filename="${document.originalName}"`,
         "Content-Type": document.mimeType,
+        ETag: etag,
+        Vary: "Cookie",
       },
     });
   } catch {

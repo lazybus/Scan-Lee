@@ -11,6 +11,10 @@ import type { Database, Json } from "@/lib/supabase/database.types";
 import type { StoredFile } from "@/lib/storage";
 
 type DocumentRow = Database["public"]["Tables"]["documents"]["Row"];
+type ListDocumentsOptions = {
+  batchId?: string;
+  documentTypeId?: string;
+};
 
 function parseRecord(value: Json | null): ExtractedRecord | null {
   if (!value) {
@@ -24,6 +28,7 @@ function mapRow(row: DocumentRow, documentTypeName: string): DocumentRecord {
   return documentRecordSchema.parse({
     id: row.id,
     ownerUserId: row.owner_user_id,
+    imageBatchId: row.image_batch_id,
     documentTypeId: row.document_type_id,
     documentTypeName,
     originalName: row.original_name,
@@ -61,14 +66,24 @@ async function loadDocumentTypeNameMap(documentTypeIds: string[]) {
   return new Map(rows.map((item) => [item.id, item.name]));
 }
 
-export async function listDocuments(): Promise<DocumentRecord[]> {
+export async function listDocuments(options: ListDocumentsOptions = {}): Promise<DocumentRecord[]> {
   const supabase = await createSupabaseServerComponentClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("documents")
     .select(
-      "id, owner_user_id, document_type_id, original_name, mime_type, storage_bucket, storage_object_path, sha256, status, model_name, extracted_data, reviewed_data, raw_response, error_message, created_at, updated_at",
+      "id, owner_user_id, image_batch_id, document_type_id, original_name, mime_type, storage_bucket, storage_object_path, sha256, status, model_name, extracted_data, reviewed_data, raw_response, error_message, created_at, updated_at",
     )
     .order("created_at", { ascending: false });
+
+  if (options.batchId) {
+    query = query.eq("image_batch_id", options.batchId);
+  }
+
+  if (options.documentTypeId) {
+    query = query.eq("document_type_id", options.documentTypeId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     if (error.code === "42P01") {
@@ -89,7 +104,7 @@ export async function getDocumentById(id: string): Promise<DocumentRecord | null
   const { data, error } = await supabase
     .from("documents")
     .select(
-      "id, owner_user_id, document_type_id, original_name, mime_type, storage_bucket, storage_object_path, sha256, status, model_name, extracted_data, reviewed_data, raw_response, error_message, created_at, updated_at",
+      "id, owner_user_id, image_batch_id, document_type_id, original_name, mime_type, storage_bucket, storage_object_path, sha256, status, model_name, extracted_data, reviewed_data, raw_response, error_message, created_at, updated_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -113,6 +128,7 @@ export async function getDocumentById(id: string): Promise<DocumentRecord | null
 }
 
 export async function createDocument(input: {
+  imageBatchId: string;
   documentTypeId: string;
   storedFile: StoredFile;
 }): Promise<DocumentRecord> {
@@ -129,6 +145,7 @@ export async function createDocument(input: {
   const insertPayload: Database["public"]["Tables"]["documents"]["Insert"] = {
     id,
     owner_user_id: user.id,
+    image_batch_id: input.imageBatchId,
     document_type_id: input.documentTypeId,
     original_name: input.storedFile.originalName,
     mime_type: input.storedFile.mimeType,
@@ -273,8 +290,9 @@ export async function failDocumentExtractionWithResponse(input: {
 
 export async function getDashboardSummary() {
   const supabase = await createSupabaseServerComponentClient();
-  const [documentTypesResult, documentCountResult, extractedCountResult] = await Promise.all([
+  const [documentTypesResult, batchCountResult, documentCountResult, extractedCountResult] = await Promise.all([
     supabase.from("document_types").select("id", { count: "exact", head: true }),
+    supabase.from("image_batches").select("id", { count: "exact", head: true }),
     supabase.from("documents").select("id", { count: "exact", head: true }),
     supabase
       .from("documents")
@@ -290,21 +308,24 @@ export async function getDashboardSummary() {
     throw new Error(documentCountResult.error.message);
   }
 
+  if (batchCountResult.error && batchCountResult.error.code !== "42P01") {
+    throw new Error(batchCountResult.error.message);
+  }
+
   if (extractedCountResult.error && extractedCountResult.error.code !== "42P01") {
     throw new Error(extractedCountResult.error.message);
   }
 
   return {
     documentTypeCount: documentTypesResult.count ?? 0,
+    batchCount: batchCountResult.count ?? 0,
     documentCount: documentCountResult.count ?? 0,
     extractedCount: extractedCountResult.count ?? 0,
   };
 }
 
-export async function getExportRows(documentTypeId?: string) {
-  const documents = documentTypeId
-    ? (await listDocuments()).filter((document) => document.documentTypeId === documentTypeId)
-    : await listDocuments();
+export async function getExportRows(options: ListDocumentsOptions = {}) {
+  const documents = await listDocuments(options);
 
   const documentTypes = await Promise.all(
     Array.from(new Set(documents.map((document) => document.documentTypeId))).map(

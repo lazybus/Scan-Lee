@@ -4,14 +4,24 @@ import { listDocuments } from "@/lib/documents";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const documents = await listDocuments();
+    const { searchParams } = new URL(request.url);
+    const batchId = searchParams.get("batchId") ?? undefined;
+
+    if (!batchId) {
+      return Response.json(
+        { error: "A batchId query parameter is required for batch extraction." },
+        { status: 400 },
+      );
+    }
+
+    const documents = await listDocuments({ batchId });
     const queuedDocuments = documents.filter((document) => document.status !== "processing");
 
     if (queuedDocuments.length === 0) {
       return Response.json(
-        { error: "No stored documents are available for batch extraction." },
+        { error: "No stored documents are available for extraction in this batch." },
         { status: 400 },
       );
     }

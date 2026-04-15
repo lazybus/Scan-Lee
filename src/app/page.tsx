@@ -17,15 +17,15 @@ export default async function Home() {
         </h1>
         <p className="mt-6 max-w-2xl text-base leading-8 text-[var(--muted)] sm:text-lg">
           Scanlee pairs local Ollama extraction with Supabase-backed accounts, private
-          uploads, and reusable document templates. Each account keeps its own documents
-          and schemas while shared starter templates remain available to duplicate.
+          uploads, image batches, and reusable document templates. Each account keeps its
+          own documents and schemas while shared starter templates remain available to duplicate.
         </p>
         <div className="mt-8 flex flex-wrap gap-4">
           <Link className="action-button" href={user ? "/dashboard" : "/register"}>
             {user ? "Open Dashboard" : "Create Account"}
           </Link>
-          <Link className="secondary-button" href={user ? "/documents" : "/login"}>
-            {user ? "Open Capture Queue" : "Log In"}
+          <Link className="secondary-button" href={user ? "/batches" : "/login"}>
+            {user ? "Open Image Batches" : "Log In"}
           </Link>
         </div>
         <div className="mt-10 grid gap-4 md:grid-cols-3">
@@ -73,7 +73,7 @@ export default async function Home() {
             {
               title: "Account-scoped workspaces",
               detail:
-                "Documents, exports, and custom templates stay attached to the signed-in user instead of a shared local workspace.",
+                "Documents, exports, and custom templates stay attached to the signed-in user and organized into private image batches.",
             },
             {
               title: "Template sharing by duplication",
@@ -107,7 +107,7 @@ export default async function Home() {
         <div className="divider my-6" />
         <div className="space-y-3 text-sm leading-7 text-[var(--muted)]">
           <p>
-            Create an account to unlock your private dashboard, upload queue, review flow,
+            Create an account to unlock your private dashboard, image batches, review flow,
             and export tools.
           </p>
           <p>

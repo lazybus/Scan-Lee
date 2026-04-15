@@ -7,6 +7,10 @@ const protectedPrefixes = ["/dashboard", "/document-types", "/documents"];
 const protectedApiPrefixes = ["/api/document-types", "/api/documents", "/api/exports"];
 const authRoutes = new Set(["/login", "/register"]);
 
+function isDocumentFilePath(pathname: string) {
+  return pathname.startsWith("/api/documents/") && pathname.endsWith("/file");
+}
+
 function isProtectedPath(pathname: string) {
   return protectedPrefixes.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
@@ -30,11 +34,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const pathname = request.nextUrl.pathname;
+
+  if (isDocumentFilePath(pathname)) {
+    return NextResponse.next();
+  }
+
   const { response, supabase } = createSupabaseMiddlewareClient(request);
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const pathname = request.nextUrl.pathname;
 
   if (!user && isProtectedPath(pathname)) {
     const loginUrl = new URL("/login", request.url);

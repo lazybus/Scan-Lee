@@ -26,6 +26,7 @@ import {
 } from "react";
 
 import type {
+  ImageBatchRecord,
   DocumentRecord,
   DocumentType,
   ExtractedRecord,
@@ -92,14 +93,36 @@ type ImagePanState = {
 type SelectedUploadItem = {
   signature: string;
   file: File;
+  optimization: UploadOptimization;
   documentTypeId: string;
   previewUrl: string;
   usesDefaultDocumentType: boolean;
 };
 
+type UploadOptimization = {
+  originalBytes: number;
+  processedBytes: number;
+  originalHeight: number | null;
+  originalWidth: number | null;
+  preservedOriginal: boolean;
+  resized: boolean;
+  targetHeight: number | null;
+  targetWidth: number | null;
+  transcodedToWebp: boolean;
+};
+
+type PreparedUpload = {
+  file: File;
+  optimization: UploadOptimization;
+  signature: string;
+};
+
 const defaultSplitRatio = 46;
+const gemmaEfficientMaxImageDimension = 1536;
 const previewScrollTopOffset = 16;
 const previewScrollBottomInset = 16;
+const uploadWebpQuality = 0.88;
+const imagePreloadConcurrency = 4;
 
 const defaultViewerState: ViewerState = {
   zoom: 1,
@@ -170,36 +193,245 @@ function getFileSignature(file: File): string {
   return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
-function createUploadItem(file: File, defaultDocumentTypeId: string): SelectedUploadItem {
+function replaceFileExtension(fileName: string, nextExtension: string): string {
+  const extensionIndex = fileName.lastIndexOf(".");
+
+  if (extensionIndex <= 0) {
+    return `${fileName}${nextExtension}`;
+  }
+
+  return `${fileName.slice(0, extensionIndex)}${nextExtension}`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function getScaledImageDimensions(width: number, height: number) {
+  const longestEdge = Math.max(width, height);
+
+  if (longestEdge <= gemmaEfficientMaxImageDimension) {
+    return {
+      height,
+      resized: false,
+      width,
+    };
+  }
+
+  const scale = gemmaEfficientMaxImageDimension / longestEdge;
+
   return {
-    signature: getFileSignature(file),
-    file,
+    height: Math.max(1, Math.round(height * scale)),
+    resized: true,
+    width: Math.max(1, Math.round(width * scale)),
+  };
+}
+
+function createUploadItem(preparedUpload: PreparedUpload, defaultDocumentTypeId: string): SelectedUploadItem {
+  return {
+    signature: preparedUpload.signature,
+    file: preparedUpload.file,
+    optimization: preparedUpload.optimization,
     documentTypeId: defaultDocumentTypeId,
-    previewUrl: URL.createObjectURL(file),
+    previewUrl: URL.createObjectURL(preparedUpload.file),
     usesDefaultDocumentType: true,
   };
 }
 
 function mergeUploadItems(
   currentItems: SelectedUploadItem[],
-  incomingFiles: File[],
+  incomingFiles: PreparedUpload[],
   defaultDocumentTypeId: string,
 ): SelectedUploadItem[] {
   const seen = new Set(currentItems.map((item) => item.signature));
   const merged = [...currentItems];
 
-  for (const file of incomingFiles) {
-    const signature = getFileSignature(file);
+  for (const preparedUpload of incomingFiles) {
+    const signature = preparedUpload.signature;
 
     if (seen.has(signature)) {
       continue;
     }
 
     seen.add(signature);
-    merged.push(createUploadItem(file, defaultDocumentTypeId));
+    merged.push(createUploadItem(preparedUpload, defaultDocumentTypeId));
   }
 
   return merged;
+}
+
+async function loadImageElement(file: File): Promise<HTMLImageElement> {
+  const objectUrl = URL.createObjectURL(file);
+
+  return new Promise((resolve, reject) => {
+    const image = new window.Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error(`Could not decode ${file.name}.`));
+    };
+
+    image.src = objectUrl;
+  });
+}
+
+async function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("Canvas export failed."));
+        return;
+      }
+
+      resolve(blob);
+    }, type, quality);
+  });
+}
+
+function buildOriginalUploadOptimization(file: File, width: number | null, height: number | null): UploadOptimization {
+  return {
+    originalBytes: file.size,
+    processedBytes: file.size,
+    originalHeight: height,
+    originalWidth: width,
+    preservedOriginal: true,
+    resized: false,
+    targetHeight: height,
+    targetWidth: width,
+    transcodedToWebp: false,
+  };
+}
+
+async function optimizeUploadImage(file: File): Promise<PreparedUpload> {
+  const signature = getFileSignature(file);
+
+  if (file.type === "image/gif") {
+    return {
+      file,
+      optimization: buildOriginalUploadOptimization(file, null, null),
+      signature,
+    };
+  }
+
+  try {
+    const image = await loadImageElement(file);
+    const originalWidth = image.naturalWidth || null;
+    const originalHeight = image.naturalHeight || null;
+
+    if (!originalWidth || !originalHeight) {
+      return {
+        file,
+        optimization: buildOriginalUploadOptimization(file, originalWidth, originalHeight),
+        signature,
+      };
+    }
+
+    const scaled = getScaledImageDimensions(originalWidth, originalHeight);
+    const shouldTranscode = file.type !== "image/webp";
+
+    if (!scaled.resized && !shouldTranscode) {
+      return {
+        file,
+        optimization: buildOriginalUploadOptimization(file, originalWidth, originalHeight),
+        signature,
+      };
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = scaled.width;
+    canvas.height = scaled.height;
+
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return {
+        file,
+        optimization: buildOriginalUploadOptimization(file, originalWidth, originalHeight),
+        signature,
+      };
+    }
+
+    context.drawImage(image, 0, 0, scaled.width, scaled.height);
+
+    const optimizedBlob = await canvasToBlob(canvas, "image/webp", uploadWebpQuality);
+
+    if (!scaled.resized && optimizedBlob.size >= file.size) {
+      return {
+        file,
+        optimization: buildOriginalUploadOptimization(file, originalWidth, originalHeight),
+        signature,
+      };
+    }
+
+    const optimizedFile = new File([optimizedBlob], replaceFileExtension(file.name, ".webp"), {
+      lastModified: file.lastModified,
+      type: "image/webp",
+    });
+
+    return {
+      file: optimizedFile,
+      optimization: {
+        originalBytes: file.size,
+        processedBytes: optimizedFile.size,
+        originalHeight,
+        originalWidth,
+        preservedOriginal: false,
+        resized: scaled.resized,
+        targetHeight: scaled.height,
+        targetWidth: scaled.width,
+        transcodedToWebp: true,
+      },
+      signature,
+    };
+  } catch {
+    return {
+      file,
+      optimization: buildOriginalUploadOptimization(file, null, null),
+      signature,
+    };
+  }
+}
+
+function buildUploadPreparationMessage(preparedUploads: PreparedUpload[]): string | null {
+  const transcodedCount = preparedUploads.filter((item) => item.optimization.transcodedToWebp).length;
+  const resizedCount = preparedUploads.filter((item) => item.optimization.resized).length;
+  const savedBytes = preparedUploads.reduce(
+    (total, item) => total + Math.max(0, item.optimization.originalBytes - item.optimization.processedBytes),
+    0,
+  );
+
+  const details = [
+    transcodedCount > 0 ? `converted ${transcodedCount} to WebP` : null,
+    resizedCount > 0 ? `resized ${resizedCount} to ${gemmaEfficientMaxImageDimension}px max` : null,
+    savedBytes > 0 ? `saved ${formatFileSize(savedBytes)}` : null,
+  ].filter(Boolean);
+
+  if (details.length === 0) {
+    return preparedUploads.length === 1
+      ? "Added 1 image to the queue."
+      : `Added ${preparedUploads.length} images to the queue.`;
+  }
+
+  return details.join(". ").replace(/^./, (value) => value.toUpperCase()) + ".";
 }
 
 function revokeUploadItems(items: SelectedUploadItem[]) {
@@ -363,9 +595,11 @@ function buildEmptyProductRow(field: TableFieldDefinition): Record<string, Extra
 }
 
 export function DocumentsWorkbench({
+  activeBatch,
   initialDocumentTypes,
   initialDocuments,
 }: {
+  activeBatch?: ImageBatchRecord;
   initialDocumentTypes: DocumentType[];
   initialDocuments: DocumentRecord[];
 }) {
@@ -373,6 +607,9 @@ export function DocumentsWorkbench({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
   const selectedFilesRef = useRef<SelectedUploadItem[]>([]);
+  const uploadPreparationTokenRef = useRef(0);
+  const preloadedDocumentImageIdsRef = useRef(new Set<string>());
+  const pendingDocumentImagePreloadsRef = useRef<Record<string, HTMLImageElement | undefined>>({});
   const splitContainerRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const previewSheetRefs = useRef<Record<string, HTMLElement | null>>({});
   const previewRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -383,8 +620,10 @@ export function DocumentsWorkbench({
   const [selectedFiles, setSelectedFiles] = useState<SelectedUploadItem[]>([]);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [pendingUploadPreparations, setPendingUploadPreparations] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exportDocumentTypeId, setExportDocumentTypeId] = useState("");
   const [filter, setFilter] = useState("");
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<string[]>([]);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ExtractedRecord>>({});
@@ -401,6 +640,7 @@ export function DocumentsWorkbench({
   const [extractionProgress, setExtractionProgress] = useState<ExtractionProgress | null>(null);
 
   const isExtracting = extractionProgress !== null;
+  const isPreparingUploads = pendingUploadPreparations > 0;
 
   const documentTypeById = useMemo(
     () => new Map(initialDocumentTypes.map((documentType) => [documentType.id, documentType])),
@@ -570,6 +810,111 @@ export function DocumentsWorkbench({
     };
   }, []);
 
+  useEffect(() => {
+    if (documents.length === 0) {
+      return;
+    }
+
+    const pendingDocuments = documents.filter(
+      (document) => !preloadedDocumentImageIdsRef.current.has(document.id),
+    );
+
+    if (pendingDocuments.length === 0) {
+      return;
+    }
+
+    let isCancelled = false;
+    let nextIndex = 0;
+    let activeCount = 0;
+    let idleCallbackId: number | null = null;
+    let timeoutId: number | null = null;
+
+    const clearPendingImage = (documentId: string) => {
+      delete pendingDocumentImagePreloadsRef.current[documentId];
+    };
+
+    const preloadDocumentImage = (document: DocumentRecord) => {
+      activeCount += 1;
+
+      const image = new window.Image();
+      pendingDocumentImagePreloadsRef.current[document.id] = image;
+
+      const finalize = (loaded: boolean) => {
+        clearPendingImage(document.id);
+
+        if (loaded) {
+          preloadedDocumentImageIdsRef.current.add(document.id);
+        }
+
+        activeCount -= 1;
+        schedulePreload();
+      };
+
+      image.decoding = "async";
+      image.onload = () => finalize(true);
+      image.onerror = () => finalize(false);
+      image.src = `/api/documents/${document.id}/file`;
+    };
+
+    const runPreloadQueue = () => {
+      if (isCancelled) {
+        return;
+      }
+
+      while (activeCount < imagePreloadConcurrency && nextIndex < pendingDocuments.length) {
+        preloadDocumentImage(pendingDocuments[nextIndex]);
+        nextIndex += 1;
+      }
+    };
+
+    const schedulePreload = () => {
+      if (isCancelled) {
+        return;
+      }
+
+      if (typeof window.requestIdleCallback === "function") {
+        idleCallbackId = window.requestIdleCallback(() => {
+          idleCallbackId = null;
+          runPreloadQueue();
+        });
+
+        return;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null;
+        runPreloadQueue();
+      }, 120);
+    };
+
+    schedulePreload();
+
+    return () => {
+      isCancelled = true;
+
+      if (idleCallbackId !== null) {
+        window.cancelIdleCallback(idleCallbackId);
+      }
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+
+      for (let index = 0; index < pendingDocuments.length; index += 1) {
+        const documentId = pendingDocuments[index].id;
+        const image = pendingDocumentImagePreloadsRef.current[documentId];
+
+        if (!image) {
+          continue;
+        }
+
+        image.onload = null;
+        image.onerror = null;
+        clearPendingImage(documentId);
+      }
+    };
+  }, [documents]);
+
   const updatePreviewOffsets = useEffectEvent(() => {
     const isDesktop = window.innerWidth > 820;
 
@@ -652,6 +997,7 @@ export function DocumentsWorkbench({
   }
 
   function clearSelectedFiles() {
+    uploadPreparationTokenRef.current += 1;
     setSelectedFiles((current) => {
       revokeUploadItems(current);
       return [];
@@ -670,13 +1016,9 @@ export function DocumentsWorkbench({
     setIsUploadModalOpen(true);
   }
 
-  function addFiles(filesToAdd: File[]) {
+  async function addFiles(filesToAdd: File[]) {
     const validFiles = filesToAdd.filter(isImageFile);
     const rejectedCount = filesToAdd.length - validFiles.length;
-
-    if (validFiles.length > 0) {
-      setSelectedFiles((current) => mergeUploadItems(current, validFiles, documentTypeId));
-    }
 
     if (rejectedCount > 0) {
       setError(
@@ -684,12 +1026,32 @@ export function DocumentsWorkbench({
           ? "Only image files can be added. One file was ignored."
           : `Only image files can be added. ${rejectedCount} files were ignored.`,
       );
+    }
+
+    if (validFiles.length === 0) {
       return;
     }
 
-    if (validFiles.length > 0) {
+    const preparationToken = uploadPreparationTokenRef.current;
+
+    setPendingUploadPreparations((current) => current + 1);
+
+    try {
+      const preparedUploads: PreparedUpload[] = [];
+
+      for (const file of validFiles) {
+        preparedUploads.push(await optimizeUploadImage(file));
+      }
+
+      if (preparationToken !== uploadPreparationTokenRef.current) {
+        return;
+      }
+
+      setSelectedFiles((current) => mergeUploadItems(current, preparedUploads, documentTypeId));
       setError(null);
-      setMessage(null);
+      setMessage(buildUploadPreparationMessage(preparedUploads));
+    } finally {
+      setPendingUploadPreparations((current) => Math.max(0, current - 1));
     }
   }
 
@@ -837,6 +1199,11 @@ export function DocumentsWorkbench({
   async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!activeBatch) {
+      setError("Open an image batch before uploading documents.");
+      return;
+    }
+
     if (selectedFiles.length === 0 || !documentTypeId) {
       setError("Choose a document type and add at least one image file first.");
       return;
@@ -854,6 +1221,7 @@ export function DocumentsWorkbench({
 
     const formData = new FormData();
     formData.append("documentTypeId", documentTypeId);
+    formData.append("imageBatchId", activeBatch.id);
 
     for (const item of selectedFiles) {
       formData.append("files", item.file);
@@ -1335,11 +1703,36 @@ export function DocumentsWorkbench({
   }
 
   function downloadExport(kind: "csv" | "xlsx") {
-    window.location.href = `/api/exports/${kind}`;
+    if (!activeBatch) {
+      setError("Open an image batch before exporting records.");
+      return;
+    }
+
+    const searchParams = new URLSearchParams({ batchId: activeBatch.id });
+
+    if (exportDocumentTypeId) {
+      searchParams.set("documentTypeId", exportDocumentTypeId);
+    }
+
+    window.location.href = `/api/exports/${kind}?${searchParams.toString()}`;
   }
 
   const uploadCountLabel =
     selectedFiles.length === 1 ? "1 file ready" : `${selectedFiles.length} files ready`;
+
+  const queuedOriginalBytes = selectedFiles.reduce(
+    (total, item) => total + item.optimization.originalBytes,
+    0,
+  );
+  const queuedProcessedBytes = selectedFiles.reduce(
+    (total, item) => total + item.optimization.processedBytes,
+    0,
+  );
+  const queuedSavedBytes = Math.max(0, queuedOriginalBytes - queuedProcessedBytes);
+  const queuedTranscodedCount = selectedFiles.filter(
+    (item) => item.optimization.transcodedToWebp,
+  ).length;
+  const queuedResizedCount = selectedFiles.filter((item) => item.optimization.resized).length;
 
   const hasMultipleDocumentTypesSelected =
     new Set(selectedFiles.map((item) => item.documentTypeId).filter(Boolean)).size > 1;
@@ -1349,7 +1742,7 @@ export function DocumentsWorkbench({
       aria-modal="true"
       className="modal-backdrop"
       onClick={(event) => {
-        if (event.target === event.currentTarget && !isUploading) {
+        if (event.target === event.currentTarget && !isUploading && !isPreparingUploads) {
           closeUploadModal();
         }
       }}
@@ -1364,6 +1757,14 @@ export function DocumentsWorkbench({
               Drop one or more scanned images here, set the default document type for the
               queue, then override individual files where needed.
             </p>
+            <p className="mt-2 max-w-2xl text-xs text-[var(--muted)]">
+              Images are converted to WebP when it helps and resized to a maximum long edge of {gemmaEfficientMaxImageDimension}px for Gemma-friendly uploads.
+            </p>
+            {activeBatch ? (
+              <p className="mt-3 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
+                Active batch: {activeBatch.name}
+              </p>
+            ) : null}
           </div>
           <button
             className="secondary-button"
@@ -1399,7 +1800,7 @@ export function DocumentsWorkbench({
             className="sr-only"
             multiple
             onChange={(event) => {
-              addFiles(Array.from(event.target.files ?? []));
+              void addFiles(Array.from(event.target.files ?? []));
               event.currentTarget.value = "";
             }}
             ref={fileInputRef}
@@ -1429,7 +1830,7 @@ export function DocumentsWorkbench({
             onDrop={(event) => {
               event.preventDefault();
               setIsDragActive(false);
-              addFiles(Array.from(event.dataTransfer.files));
+              void addFiles(Array.from(event.dataTransfer.files));
             }}
           >
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1476,6 +1877,20 @@ export function DocumentsWorkbench({
               </p>
             ) : null}
 
+            {selectedFiles.length > 0 ? (
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                {queuedTranscodedCount > 0 || queuedResizedCount > 0
+                  ? `${queuedTranscodedCount} WebP conversions, ${queuedResizedCount} resized, ${formatFileSize(queuedProcessedBytes)} queued${queuedSavedBytes > 0 ? `, ${formatFileSize(queuedSavedBytes)} saved` : ""}.`
+                  : `${formatFileSize(queuedProcessedBytes)} queued without client-side changes.`}
+              </p>
+            ) : null}
+
+            {isPreparingUploads ? (
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                Optimizing queued images before upload...
+              </p>
+            ) : null}
+
             {selectedFiles.length === 0 ? (
               <div className="mt-4 border-2 border-dashed border-[color:var(--line)] p-5 text-sm text-[var(--muted)]">
                 No images queued yet.
@@ -1506,6 +1921,20 @@ export function DocumentsWorkbench({
                           title={item.file.name}
                         >
                           {truncatedFileName}
+                        </p>
+                        <p className="mt-1 text-xs text-[var(--muted)]">
+                          {[
+                            item.optimization.transcodedToWebp ? "WebP" : "Original",
+                            item.optimization.targetWidth && item.optimization.targetHeight
+                              ? `${item.optimization.targetWidth}x${item.optimization.targetHeight}`
+                              : null,
+                            formatFileSize(item.optimization.processedBytes),
+                            item.optimization.processedBytes < item.optimization.originalBytes
+                              ? `from ${formatFileSize(item.optimization.originalBytes)}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </p>
                       </div>
                       <div className="upload-queue-item__controls">
@@ -1547,19 +1976,21 @@ export function DocumentsWorkbench({
 
           <div className="flex flex-col gap-3 border-t-2 border-[color:var(--line)] pt-5 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-[var(--muted)]">
-              Each queued image will be stored as a separate document.
+              Each queued image will be stored as a separate document in this batch.
             </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <button
                 className="secondary-button"
-                disabled={isUploading}
+                disabled={isUploading || isPreparingUploads}
                 onClick={closeUploadModal}
                 type="button"
               >
                 Cancel
               </button>
-              <button className="action-button" disabled={isUploading} type="submit">
-                {isUploading
+              <button className="action-button" disabled={isUploading || isPreparingUploads} type="submit">
+                {isPreparingUploads
+                  ? "Optimizing..."
+                  : isUploading
                   ? "Saving..."
                   : selectedFiles.length <= 1
                     ? "Store document"
@@ -1633,6 +2064,15 @@ export function DocumentsWorkbench({
       <section className="paper-panel p-5 sm:p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="toolbar-group flex-1">
+            {activeBatch ? (
+              <div className="mb-4">
+                <p className="data-label">Active Batch</p>
+                <p className="mt-2 text-xl font-semibold text-[var(--ink)]">{activeBatch.name}</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  {documents.length === 1 ? "1 document in this batch" : `${documents.length} documents in this batch`}
+                </p>
+              </div>
+            ) : null}
             <button
               className="action-button toolbar-action w-full md:w-auto"
               disabled={isUploading}
@@ -1645,6 +2085,21 @@ export function DocumentsWorkbench({
 
           <div className="toolbar-group md:min-w-fit">
             <p className="data-label">Exports</p>
+            <label className="mt-3 block space-y-2">
+              <span className="data-label">Scope</span>
+              <select
+                className="select-base min-w-[14rem]"
+                value={exportDocumentTypeId}
+                onChange={(event) => setExportDocumentTypeId(event.target.value)}
+              >
+                <option value="">Entire batch</option>
+                {initialDocumentTypes.map((documentType) => (
+                  <option key={documentType.id} value={documentType.id}>
+                    {documentType.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="mt-3 flex flex-wrap gap-3">
               <button
                 aria-label="Export records as CSV"
@@ -1680,7 +2135,9 @@ export function DocumentsWorkbench({
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="data-label">Queue</p>
-            <h2 className="mt-3 text-2xl font-semibold">Stored documents</h2>
+            <h2 className="mt-3 text-2xl font-semibold">
+              {activeBatch ? "Stored documents in this batch" : "Stored documents"}
+            </h2>
           </div>
           <div className="flex w-full flex-col gap-3 sm:max-w-md sm:items-end">
             <button

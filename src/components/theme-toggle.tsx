@@ -2,7 +2,7 @@
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faLightbulb } from "@fortawesome/free-solid-svg-icons";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Theme = "dark" | "light";
 
@@ -15,12 +15,24 @@ function applyTheme(theme: Theme) {
 
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof document === "undefined") {
+    if (typeof window === "undefined") {
       return "dark";
     }
 
-    return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    try {
+      return window.localStorage.getItem(storageKey) === "light" ? "light" : "dark";
+    } catch {
+      return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    }
   });
+
+  useEffect(() => {
+    try {
+      applyTheme(theme);
+    } catch {
+      applyTheme("dark");
+    }
+  }, [theme]);
 
   function handleToggle() {
     const nextTheme = theme === "dark" ? "light" : "dark";
@@ -34,6 +46,7 @@ export function ThemeToggle() {
       aria-pressed={theme === "light"}
       className="theme-icon-button"
       onClick={handleToggle}
+      suppressHydrationWarning
       title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
       type="button"
     >
