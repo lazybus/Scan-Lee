@@ -387,6 +387,124 @@ a {
     inset 0 1px 0 color-mix(in srgb, white 8%, transparent 92%);
 }
 
+.footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.footer-links-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.footer-brand-copy {
+  line-height: 1.65;
+}
+
+.footer-nav-group {
+  min-width: 0;
+}
+
+.footer-link {
+  color: var(--ink);
+  font-size: 0.95rem;
+  text-decoration: none;
+  transition:
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.footer-link:hover {
+  color: var(--accent-soft);
+  transform: translateX(2px);
+}
+
+.footer-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-soft) 76%, transparent 24%);
+  outline-offset: 4px;
+  border-radius: 0.2rem;
+}
+
+.content-page-shell {
+  max-width: 54rem;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 2vw, 2rem);
+}
+
+.content-page-header {
+  margin-bottom: 2rem;
+}
+
+.content-page-eyebrow {
+  margin-bottom: 0.75rem;
+}
+
+.content-page-title {
+  font-size: clamp(2.2rem, 4vw, 3.4rem);
+  line-height: 0.96;
+  letter-spacing: -0.04em;
+}
+
+.content-page-lead {
+  margin-top: 1rem;
+  max-width: 42rem;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.75;
+}
+
+.content-page-body {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.content-page-section {
+  padding: 1.4rem 1.5rem;
+}
+
+.content-page-section h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.content-page-section p,
+.content-page-section li,
+.content-page-section address {
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.content-page-section ul {
+  margin-top: 0.85rem;
+  padding-left: 1.2rem;
+}
+
+.content-page-section a {
+  color: var(--accent-soft);
+}
+
+@media (max-width: 900px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .footer-links-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .content-page-shell {
+    padding: 1rem;
+  }
+
+  .content-page-section {
+    padding: 1.15rem;
+  }
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
