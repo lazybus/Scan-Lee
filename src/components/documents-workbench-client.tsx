@@ -25,6 +25,7 @@ import {
   useTransition,
 } from "react";
 
+import { trackEvent } from "@/lib/analytics";
 import type {
   ImageBatchRecord,
   DocumentRecord,
@@ -1248,6 +1249,18 @@ export function DocumentsWorkbench({
             ? `Uploaded ${uploadedItems[0].originalName}.`
             : `Uploaded ${uploadedItems.length} documents.`,
         );
+        trackEvent("document_upload", {
+          batch_scope: "image_batch",
+          document_type_count: new Set(
+            selectedFiles.map((item) => item.documentTypeId).filter(Boolean),
+          ).size,
+          file_count: uploadedItems.length,
+          optimized_file_count: selectedFiles.filter(
+            (item) => !item.optimization.preservedOriginal,
+          ).length,
+          resized_file_count: selectedFiles.filter((item) => item.optimization.resized).length,
+          status: "success",
+        });
         closeUploadModal();
         router.refresh();
       } catch (uploadError) {
@@ -1297,6 +1310,11 @@ export function DocumentsWorkbench({
                 : { ...currentDocument, status: "failed", errorMessage: nextError };
             }),
           );
+          trackEvent("document_extraction", {
+            document_count: 1,
+            mode: "single",
+            status: "failed",
+          });
           setError(nextError);
           return;
         }
@@ -1309,6 +1327,11 @@ export function DocumentsWorkbench({
         setDocuments((current) =>
           current.map((currentDocument) => (currentDocument.id === id ? data.item! : currentDocument)),
         );
+        trackEvent("document_extraction", {
+          document_count: 1,
+          mode: "single",
+          status: data.warning ? "warning" : "success",
+        });
         setMessage(data.warning ?? `Extracted ${data.item.originalName}.`);
         router.refresh();
       } catch (extractError) {
@@ -1322,6 +1345,11 @@ export function DocumentsWorkbench({
               : currentDocument,
           ),
         );
+        trackEvent("document_extraction", {
+          document_count: 1,
+          mode: "single",
+          status: "failed",
+        });
         setError(nextError);
       } finally {
         setExtractionProgress(null);
@@ -1421,6 +1449,15 @@ export function DocumentsWorkbench({
             failureCount > 0 ? `, ${failureCount} failed` : ""
           }${skippedCount > 0 ? `, ${skippedCount} skipped` : ""}).`,
         );
+        trackEvent("document_extraction", {
+          document_count: queuedDocuments.length,
+          failure_count: failureCount,
+          mode: "batch",
+          skipped_count: skippedCount,
+          status:
+            failureCount > 0 ? (successCount > 0 ? "partial" : "failed") : "success",
+          success_count: successCount,
+        });
 
         if (failureCount > 0) {
           setError(`${failureCount} document extractions failed. Check the affected rows for details.`);
@@ -1714,7 +1751,21 @@ export function DocumentsWorkbench({
       searchParams.set("documentTypeId", exportDocumentTypeId);
     }
 
-    window.location.href = `/api/exports/${kind}?${searchParams.toString()}`;
+    const exportHref = `/api/exports/${kind}?${searchParams.toString()}`;
+
+    trackEvent(
+      "document_export",
+      {
+        format: kind,
+        scope: exportDocumentTypeId ? "document_type" : "batch",
+        status: "started",
+      },
+      {
+        eventCallback: () => {
+          window.location.href = exportHref;
+        },
+      },
+    );
   }
 
   const uploadCountLabel =

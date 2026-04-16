@@ -4,6 +4,7 @@ import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
 import { signOutAction } from "@/app/auth/actions";
 import { AppFooter } from "@/components/app-footer";
 import { AppHeader } from "@/components/app-header";
+import { GoogleAnalytics } from "@/components/google-analytics";
 import { hasSupabaseEnv } from "@/lib/supabase/config";
 import { getCurrentUser } from "@/lib/supabase/server";
 import "./globals.css";
@@ -23,6 +24,8 @@ export const metadata: Metadata = {
   title: "Scanlee",
   description: "Secure document extraction with Supabase, personal workspaces, and Ollama.",
 };
+
+const googleAnalyticsId = process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID;
 
 export default async function RootLayout({
   children,
@@ -47,6 +50,7 @@ export default async function RootLayout({
             <AppFooter />
           </div>
         </div>
+        {googleAnalyticsId ? <GoogleAnalytics measurementId={googleAnalyticsId} /> : null}
       </body>
     </html>
   );

@@ -36,6 +36,7 @@ Create a local `.env` file with the core Supabase settings:
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
+NEXT_PUBLIC_GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX
 SUPABASE_SECRET_KEY=sb_secret_...
 SUPABASE_STORAGE_BUCKET=scanlee-documents
 ```
@@ -43,6 +44,7 @@ SUPABASE_STORAGE_BUCKET=scanlee-documents
 - `NEXT_PUBLIC_SUPABASE_URL` is your Supabase project URL.
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` is the browser-safe key used for auth and RLS-protected requests.
 - `NEXT_PUBLIC_SITE_URL` is the base URL used for auth redirects.
+- `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID` is your Google Analytics 4 measurement id used to load site-wide analytics.
 - `SUPABASE_SECRET_KEY` is the server-only key for privileged server operations.
 - `SUPABASE_STORAGE_BUCKET` is the private bucket used for document uploads.
 
@@ -97,3 +99,4 @@ Then open `http://localhost:3000`.
 - Protected routes require valid Supabase environment variables and the applied SQL migration.
 - Extraction quality varies by model, so validate at least one real document and one table-heavy document type when changing providers or model ids.
 - The seeded starter templates include cheque and invoice, and additional templates can be shared by duplication without exposing a user's private workspace.
+- Google Analytics loads automatically across the app when `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID` is set at build time.
