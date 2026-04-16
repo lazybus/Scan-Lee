@@ -432,7 +432,8 @@ export function DocumentTypesManager({
                   return (
                     <article
                       key={documentType.id}
-                      className="border-2 border-[var(--ink)] bg-[var(--panel-strong)] p-5"
+                      className="document-type-card p-5"
+                      data-expanded={isExpanded ? "true" : "false"}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
@@ -458,7 +459,7 @@ export function DocumentTypesManager({
                         <button
                           aria-controls={contentId}
                           aria-expanded={isExpanded}
-                          className="inline-flex items-center gap-2 border-2 border-[var(--line)] px-3 py-2 font-mono text-xs uppercase tracking-[0.18em] text-[var(--paper)] transition hover:border-[var(--ink)]"
+                          className="document-type-card__toggle inline-flex items-center gap-2 px-3 py-2 font-mono text-xs uppercase tracking-[0.18em] text-[var(--ink)]"
                           onClick={() => toggleDocumentTypeExpanded(documentType.id)}
                           type="button"
                         >
@@ -525,11 +526,13 @@ export function DocumentTypesManager({
                                         <span />
                                       </span>
                                     </button>
-                                  ) : null}
+                                  ) : (
+                                    <span aria-hidden="true" className="saved-field-card__rail" />
+                                  )}
                                   {isDropTarget ? (
                                     <span className="reorder-drop-indicator" aria-hidden="true" />
                                   ) : null}
-                                  <div className={canManage ? "saved-field-card__content" : "space-y-1"}>
+                                  <div className="saved-field-card__content">
                                     <p className="font-medium">{field.label}</p>
                                     <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
                                       {field.kind}
