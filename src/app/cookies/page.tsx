@@ -28,15 +28,17 @@ export default function CookiesPage() {
           <li>Session tokens or identifiers required for Supabase authentication flows.</li>
           <li>Theme or display preferences needed to keep the interface consistent between visits.</li>
           <li>Short-lived state used to complete sign-in, navigation, or protected route checks.</li>
+          <li>Cookie preference choices that remember whether analytics is allowed or declined.</li>
         </ul>
       </section>
 
       <section className="content-page-section paper-panel">
         <h2>Analytics and advertising</h2>
         <p>
-          This project draft does not assume advertising cookies or third-party marketing trackers are enabled. If a specific deployment
-          adds analytics, monitoring, or marketing tools later, this page should be updated to reflect those technologies and any
-          required consent flows.
+          Scanlee separates cookie use into categories. Required cookies stay enabled because they are needed for authentication,
+          security, and core app behavior. Analytics cookies are optional and only load Google Analytics after you explicitly allow
+          them in the cookie preferences panel. If you decline analytics, the analytics scripts are not loaded. Scanlee does not use
+          advertising cookies or marketing trackers in the current product setup.
         </p>
       </section>
 
@@ -44,7 +46,8 @@ export default function CookiesPage() {
         <h2>Your choices</h2>
         <p>
           Most browsers let you block or clear cookies and local storage. Doing so may sign you out, interrupt protected routes,
-          or prevent parts of Scanlee from working correctly.
+          or prevent parts of Scanlee from working correctly. If you clear your cookies, Scanlee may ask again whether you want to
+          allow analytics cookies. You can also reopen cookie preferences any time through the Manage cookies control in the footer.
         </p>
       </section>
     </ContentPageShell>

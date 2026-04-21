@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
 
 import { signOutAction } from "@/app/auth/actions";
+import { AnalyticsConsentGate } from "@/components/analytics-consent-gate";
 import { AppFooter } from "@/components/app-footer";
 import { AppHeader } from "@/components/app-header";
-import { GoogleAnalytics } from "@/components/google-analytics";
+import {
+  cookieConsentCookieName,
+  legacyAnalyticsConsentCookieName,
+  parseCookieConsentValue,
+} from "@/lib/cookie-consent";
 import { hasSupabaseEnv } from "@/lib/supabase/config";
 import { getCurrentUser } from "@/lib/supabase/server";
 import "./globals.css";
@@ -33,6 +39,12 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const user = hasSupabaseEnv() ? await getCurrentUser().catch(() => null) : null;
+  const cookieStore = await cookies();
+  const consentCookieValue =
+    cookieStore.get(cookieConsentCookieName)?.value ??
+    cookieStore.get(legacyAnalyticsConsentCookieName)?.value ??
+    null;
+  const initialPreferences = parseCookieConsentValue(consentCookieValue);
 
   return (
     <html
@@ -50,7 +62,12 @@ export default async function RootLayout({
             <AppFooter />
           </div>
         </div>
-        {googleAnalyticsId ? <GoogleAnalytics measurementId={googleAnalyticsId} /> : null}
+        {googleAnalyticsId ? (
+          <AnalyticsConsentGate
+            initialPreferences={initialPreferences}
+            measurementId={googleAnalyticsId}
+          />
+        ) : null}
       </body>
     </html>
   );

@@ -212,9 +212,11 @@ a {
 .data-label {
   font-family: var(--font-plex-mono), monospace;
   font-size: 0.74rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--muted);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
 }
 
 .input-base,
@@ -415,6 +417,13 @@ a {
     transform 140ms ease;
 }
 
+.footer-link-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
 .footer-link:hover {
   color: var(--accent-soft);
   transform: translateX(2px);
@@ -566,6 +575,75 @@ a {
   color: var(--danger);
 }
 
+.cookie-consent-shell {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  left: 1rem;
+  z-index: 70;
+  pointer-events: none;
+}
+
+.cookie-consent-banner {
+  margin-left: auto;
+  max-width: 34rem;
+  pointer-events: auto;
+}
+
+.cookie-consent-copy {
+  margin-top: 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.cookie-consent-copy a {
+  color: var(--accent-soft);
+}
+
+.cookie-consent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.cookie-consent-categories {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.cookie-consent-category {
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel-strong) 88%, var(--canvas) 12%);
+}
+
+.cookie-toggle {
+  display: inline-flex;
+  min-width: 6.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--field-surface) 82%, var(--canvas) 18%);
+  padding: 0.65rem 0.9rem;
+  color: var(--ink);
+}
+
+.cookie-toggle input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent);
+}
+
+.cookie-toggle span {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .toast-dismiss-button {
   display: inline-flex;
   align-items: center;
@@ -601,11 +679,44 @@ a {
     left: 0.9rem;
     max-width: none;
   }
+
+  .cookie-consent-shell {
+    right: 0.75rem;
+    bottom: 0.75rem;
+    left: 0.75rem;
+  }
+
+  .cookie-consent-banner {
+    max-width: none;
+  }
 }
 
 .modal-panel {
   max-height: min(90vh, 52rem);
   overflow-y: auto;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.modal-panel[data-drop-target="true"] {
+  cursor: copy;
+}
+
+.modal-panel[data-drop-target="true"]:has(button:hover, input:hover, select:hover, textarea:hover, a:hover, label:hover) {
+  cursor: auto;
+}
+
+.modal-panel[data-drag-active="true"] {
+  border-color: color-mix(in srgb, var(--accent-soft) 58%, var(--line-strong) 42%);
+  background: color-mix(in srgb, var(--panel) 84%, var(--accent-soft) 16%);
+  box-shadow:
+    0 34px 80px -40px var(--shadow-strong),
+    0 0 0 2px color-mix(in srgb, var(--accent-strong) 34%, transparent 66%),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent-soft) 38%, transparent 62%),
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent 92%);
 }
 
 .dropzone-panel {

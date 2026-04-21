@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { createPortal } from "react-dom";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
@@ -60,6 +61,7 @@ export function ImageBatchesManager({
 }) {
   const router = useRouter();
   const [batches, setBatches] = useState(initialBatches);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<ImageBatchInput>(emptyDraft);
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [editDrafts, setEditDrafts] = useState<Record<string, ImageBatchInput>>({});
@@ -88,6 +90,35 @@ export function ImageBatchesManager({
     const timeout = window.setTimeout(() => setError(null), 5200);
     return () => window.clearTimeout(timeout);
   }, [error]);
+
+  useEffect(() => {
+    if (!isCreateModalOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isPending) {
+        setIsCreateModalOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCreateModalOpen, isPending]);
+
+  function openCreateModal() {
+    setError(null);
+    setMessage(null);
+    setIsCreateModalOpen(true);
+  }
+
+  function closeCreateModal() {
+    if (isPending) {
+      return;
+    }
+
+    setIsCreateModalOpen(false);
+  }
 
   function beginEdit(batch: ImageBatchRecord) {
     setEditingBatchId(batch.id);
@@ -152,7 +183,9 @@ export function ImageBatchesManager({
 
         setBatches((current) => [data.item!, ...current]);
         setCreateDraft(emptyDraft);
+        setIsCreateModalOpen(false);
         setMessage(`Created batch ${data.item.name}.`);
+        router.push(`/batches/${data.item.id}`);
         router.refresh();
       } catch (createError) {
         setError(createError instanceof Error ? createError.message : "Image batch creation failed.");
@@ -198,6 +231,89 @@ export function ImageBatchesManager({
     });
   }
 
+  const createBatchModal = isCreateModalOpen ? (
+    <div
+      aria-modal="true"
+      className="modal-backdrop"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          closeCreateModal();
+        }
+      }}
+      role="dialog"
+    >
+      <div className="modal-panel paper-panel w-full max-w-2xl p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="data-label">New Batch</p>
+            <h2 className="mt-3 text-2xl font-semibold">Start a capture batch</h2>
+            <p className="mt-2 max-w-xl text-sm leading-7 text-[var(--muted)]">
+              Name the batch, add optional context, then continue directly into the batch editor.
+            </p>
+          </div>
+          <button
+            className="secondary-button"
+            disabled={isPending}
+            onClick={closeCreateModal}
+            type="button"
+          >
+            Close
+          </button>
+        </div>
+
+        <form className="mt-6 space-y-4" onSubmit={handleCreate}>
+          <label className="block space-y-2">
+            <span className="data-label">Name</span>
+            <input
+              className="input-base"
+              value={createDraft.name}
+              onChange={(event) => setCreateDraft((current) => ({ ...current, name: event.target.value }))}
+              placeholder="Project Atlas invoices"
+            />
+          </label>
+          <label className="block space-y-2">
+            <span className="data-label">Description</span>
+            <textarea
+              className="input-base min-h-28"
+              value={createDraft.description}
+              onChange={(event) =>
+                setCreateDraft((current) => ({ ...current, description: event.target.value }))
+              }
+              placeholder="April vendor invoices for Project Atlas"
+            />
+          </label>
+          <label className="block space-y-2">
+            <span className="data-label">Status</span>
+            <select
+              className="select-base"
+              value={createDraft.status}
+              onChange={(event) =>
+                setCreateDraft((current) => ({
+                  ...current,
+                  status: event.target.value as ImageBatchInput["status"],
+                }))
+              }
+            >
+              {batchStatusValues.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button className="secondary-button" disabled={isPending} onClick={closeCreateModal} type="button">
+              Cancel
+            </button>
+            <button className="action-button" disabled={isPending} type="submit">
+              {isPending ? "Creating..." : "Create Batch"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="space-y-6">
       {message || error ? (
@@ -222,83 +338,28 @@ export function ImageBatchesManager({
       ) : null}
 
       <section className="paper-panel p-6 sm:p-8">
-        <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-          <div>
-            <p className="data-label">Image Batches</p>
-            <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Create organized capture runs</h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--muted)] sm:text-base">
-              Group uploads by project, date, or workflow. Open a batch to add document images,
-              run extraction, review results, and export either the full batch or one document type.
-            </p>
-          </div>
-
-          <form className="record-sheet space-y-4 p-5" onSubmit={handleCreate}>
-            <div>
-              <p className="data-label">New Batch</p>
-              <h2 className="mt-2 text-2xl font-semibold">Start a capture batch</h2>
-            </div>
-            <label className="block space-y-2">
-              <span className="data-label">Name</span>
-              <input
-                className="input-base"
-                value={createDraft.name}
-                onChange={(event) => setCreateDraft((current) => ({ ...current, name: event.target.value }))}
-                placeholder="Project Atlas invoices"
-              />
-            </label>
-            <label className="block space-y-2">
-              <span className="data-label">Description</span>
-              <textarea
-                className="input-base min-h-28"
-                value={createDraft.description}
-                onChange={(event) =>
-                  setCreateDraft((current) => ({ ...current, description: event.target.value }))
-                }
-                placeholder="April vendor invoices for Project Atlas"
-              />
-            </label>
-            <label className="block space-y-2">
-              <span className="data-label">Status</span>
-              <select
-                className="select-base"
-                value={createDraft.status}
-                onChange={(event) =>
-                  setCreateDraft((current) => ({
-                    ...current,
-                    status: event.target.value as ImageBatchInput["status"],
-                  }))
-                }
-              >
-                {batchStatusValues.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="flex justify-end">
-              <button className="action-button" disabled={isPending} type="submit">
-                {isPending ? "Creating..." : "Create Batch"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </section>
-
-      <section className="paper-panel p-6 sm:p-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="data-label">Workspace Batches</p>
-            <h2 className="mt-3 text-2xl font-semibold">Available batches</h2>
+            <p className="data-label">Image Batches</p>
+            <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Available batches</h1>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--muted)] sm:text-base">
+              Group uploads by project, date, or workflow. Start a new capture run here, then move
+              directly into its editor to add images and process documents.
+            </p>
           </div>
-          <p className="text-sm text-[var(--muted)]">
-            {batches.length === 1 ? "1 batch" : `${batches.length} batches`}
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm text-[var(--muted)]">
+              {batches.length === 1 ? "1 batch" : `${batches.length} batches`}
+            </p>
+            <button className="action-button" onClick={openCreateModal} type="button">
+              Create Batch
+            </button>
+          </div>
         </div>
 
         {batches.length === 0 ? (
           <div className="mt-6 border-2 border-dashed border-[color:var(--line)] p-6 text-sm text-[var(--muted)]">
-            No image batches yet. Create one above to start organizing uploads.
+            No image batches yet. Use Create Batch to start organizing uploads.
           </div>
         ) : (
           <div className="mt-6 space-y-4">
@@ -408,6 +469,10 @@ export function ImageBatchesManager({
           </div>
         )}
       </section>
+
+      {typeof document !== "undefined" && createBatchModal
+        ? createPortal(createBatchModal, document.body)
+        : null}
     </div>
   );
 }

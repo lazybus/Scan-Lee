@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { hasSupabaseEnv } from "@/lib/supabase/config";
-import { createSupabaseMiddlewareClient } from "@/lib/supabase/server";
+import {
+  createSupabaseMiddlewareClient,
+  getSupabaseMiddlewareUser,
+} from "@/lib/supabase/server";
 
 const protectedPrefixes = ["/dashboard", "/document-types", "/documents"];
 const protectedApiPrefixes = ["/api/document-types", "/api/documents", "/api/exports"];
@@ -41,9 +44,7 @@ export async function middleware(request: NextRequest) {
   }
 
   const { response, supabase } = createSupabaseMiddlewareClient(request);
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSupabaseMiddlewareUser(request, supabase, response);
 
   if (!user && isProtectedPath(pathname)) {
     const loginUrl = new URL("/login", request.url);

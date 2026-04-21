@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  faArrowLeft,
   faArrowsRotate,
   faCircleCheck,
   faFileCsv,
@@ -8,11 +9,14 @@ import {
   faFloppyDisk,
   faMagnifyingGlassMinus,
   faMagnifyingGlassPlus,
+  faPenToSquare,
+  faPlus,
   faRotateLeft,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import {
@@ -27,6 +31,7 @@ import {
 
 import { trackEvent } from "@/lib/analytics";
 import type {
+  ImageBatchInput,
   ImageBatchRecord,
   DocumentRecord,
   DocumentType,
@@ -37,6 +42,7 @@ import type {
   ProductColumnDefinition,
   TableFieldDefinition,
 } from "@/lib/domain";
+import { batchStatusValues, imageBatchInputSchema } from "@/lib/domain";
 
 type ExtractionResponse = {
   item?: DocumentRecord;
@@ -52,6 +58,11 @@ type UploadDocumentsResponse = {
 
 type ReviewResponse = {
   item?: DocumentRecord;
+  error?: string;
+};
+
+type BatchMutationResponse = {
+  item?: ImageBatchRecord;
   error?: string;
 };
 
@@ -579,6 +590,14 @@ function getTextRowsForValue(value: ExtractedValue | undefined): number {
   return getRowsForValue(formatEditableValue(value));
 }
 
+function createBatchDraft(batch?: ImageBatchRecord): ImageBatchInput {
+  return {
+    name: batch?.name ?? "",
+    description: batch?.description ?? "",
+    status: batch?.status ?? "draft",
+  };
+}
+
 function isRecordValue(value: ExtractedValue): value is Record<string, ExtractedValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -615,6 +634,9 @@ export function DocumentsWorkbench({
   const previewSheetRefs = useRef<Record<string, HTMLElement | null>>({});
   const previewRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const imageWheelCleanupRefs = useRef<Record<string, (() => void) | undefined>>({});
+  const [batch, setBatch] = useState(activeBatch);
+  const [batchDraft, setBatchDraft] = useState<ImageBatchInput>(() => createBatchDraft(activeBatch));
+  const [isEditingBatch, setIsEditingBatch] = useState(false);
   const [documentTypeId, setDocumentTypeId] = useState(initialDocumentTypes[0]?.id ?? "");
   const [documents, setDocuments] = useState(initialDocuments);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
@@ -636,6 +658,7 @@ export function DocumentsWorkbench({
   const [isUploading, startUploadTransition] = useTransition();
   const [isDeleting, startDeleteTransition] = useTransition();
   const [isSavingReview, startReviewTransition] = useTransition();
+  const [isSavingBatch, startBatchSaveTransition] = useTransition();
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [savingDocumentId, setSavingDocumentId] = useState<string | null>(null);
   const [extractionProgress, setExtractionProgress] = useState<ExtractionProgress | null>(null);
@@ -720,6 +743,12 @@ export function DocumentsWorkbench({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [isUploadModalOpen]);
+
+  useEffect(() => {
+    setBatch(activeBatch);
+    setBatchDraft(createBatchDraft(activeBatch));
+    setIsEditingBatch(false);
+  }, [activeBatch]);
 
   useEffect(() => {
     if (!activeSplitDrag && !activeImagePan) {
@@ -1197,10 +1226,71 @@ export function DocumentsWorkbench({
     }));
   }
 
+  function beginBatchEdit() {
+    if (!batch) {
+      return;
+    }
+
+    setBatchDraft(createBatchDraft(batch));
+    setIsEditingBatch(true);
+    setError(null);
+    setMessage(null);
+  }
+
+  function cancelBatchEdit() {
+    setBatchDraft(createBatchDraft(batch));
+    setIsEditingBatch(false);
+  }
+
+  function handleBatchFieldChange<K extends keyof ImageBatchInput>(
+    key: K,
+    value: ImageBatchInput[K],
+  ) {
+    setBatchDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function handleBatchSave() {
+    if (!batch) {
+      return;
+    }
+
+    setError(null);
+    setMessage(null);
+
+    startBatchSaveTransition(async () => {
+      try {
+        const payload = imageBatchInputSchema.parse(batchDraft);
+        const response = await fetch(`/api/image-batches/${batch.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = (await response.json()) as BatchMutationResponse;
+
+        if (!response.ok || !data.item) {
+          throw new Error(data.error ?? "Image batch update failed.");
+        }
+
+        setBatch(data.item);
+        setBatchDraft(createBatchDraft(data.item));
+        setIsEditingBatch(false);
+        setMessage(`Updated batch ${data.item.name}.`);
+        router.refresh();
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "Image batch update failed.");
+      }
+    });
+  }
+
   async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!activeBatch) {
+    if (!batch) {
       setError("Open an image batch before uploading documents.");
       return;
     }
@@ -1222,7 +1312,7 @@ export function DocumentsWorkbench({
 
     const formData = new FormData();
     formData.append("documentTypeId", documentTypeId);
-    formData.append("imageBatchId", activeBatch.id);
+  formData.append("imageBatchId", batch.id);
 
     for (const item of selectedFiles) {
       formData.append("files", item.file);
@@ -1740,12 +1830,12 @@ export function DocumentsWorkbench({
   }
 
   function downloadExport(kind: "csv" | "xlsx") {
-    if (!activeBatch) {
+    if (!batch) {
       setError("Open an image batch before exporting records.");
       return;
     }
 
-    const searchParams = new URLSearchParams({ batchId: activeBatch.id });
+    const searchParams = new URLSearchParams({ batchId: batch.id });
 
     if (exportDocumentTypeId) {
       searchParams.set("documentTypeId", exportDocumentTypeId);
@@ -1799,7 +1889,42 @@ export function DocumentsWorkbench({
       }}
       role="dialog"
     >
-      <div className="modal-panel paper-panel w-full max-w-5xl p-5 sm:p-6">
+      <div
+        className="modal-panel paper-panel w-full max-w-5xl p-5 sm:p-6"
+        data-drop-target="true"
+        data-drag-active={isDragActive ? "true" : "false"}
+        onClick={(event) => {
+          const interactiveTarget = (event.target as HTMLElement | null)?.closest(
+            "button, input, select, textarea, a, label",
+          );
+
+          if (!interactiveTarget) {
+            fileInputRef.current?.click();
+          }
+        }}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setIsDragActive(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            return;
+          }
+
+          setIsDragActive(false);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setIsDragActive(true);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragActive(false);
+          void addFiles(Array.from(event.dataTransfer.files));
+        }}
+      >
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="data-label">Batch Upload</p>
@@ -1811,9 +1936,9 @@ export function DocumentsWorkbench({
             <p className="mt-2 max-w-2xl text-xs text-[var(--muted)]">
               Images are converted to WebP when it helps and resized to a maximum long edge of {gemmaEfficientMaxImageDimension}px for Gemma-friendly uploads.
             </p>
-            {activeBatch ? (
+            {batch ? (
               <p className="mt-3 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
-                Active batch: {activeBatch.name}
+                Active batch: {batch.name}
               </p>
             ) : null}
           </div>
@@ -1861,33 +1986,11 @@ export function DocumentsWorkbench({
           <div
             className="dropzone-panel"
             data-active={isDragActive ? "true" : "false"}
-            onDragEnter={(event) => {
-              event.preventDefault();
-              setIsDragActive(true);
-            }}
-            onDragLeave={(event) => {
-              event.preventDefault();
-
-              if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                return;
-              }
-
-              setIsDragActive(false);
-            }}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setIsDragActive(true);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              setIsDragActive(false);
-              void addFiles(Array.from(event.dataTransfer.files));
-            }}
           >
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-lg font-semibold text-[var(--ink)]">
-                  Drag images here or browse from disk
+                  Drop images anywhere in this window or browse from disk
                 </p>
                 <p className="mt-2 text-sm text-[var(--muted)]">
                   PNG, JPG, WEBP, TIFF, and other image uploads are accepted.
@@ -2112,70 +2215,172 @@ export function DocumentsWorkbench({
         </div>
       ) : null}
 
-      <section className="paper-panel p-5 sm:p-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="toolbar-group flex-1">
-            {activeBatch ? (
-              <div className="mb-4">
-                <p className="data-label">Active Batch</p>
-                <p className="mt-2 text-xl font-semibold text-[var(--ink)]">{activeBatch.name}</p>
-                <p className="mt-2 text-sm text-[var(--muted)]">
-                  {documents.length === 1 ? "1 document in this batch" : `${documents.length} documents in this batch`}
+      <section className="paper-panel p-6 sm:p-8">
+        <div className="space-y-5">
+          {batch ? (
+            isEditingBatch ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <Link aria-label="Back to batches" className="header-icon-button" href="/batches" title="Back to Batches">
+                    <FontAwesomeIcon icon={faArrowLeft} />
+                    <span className="sr-only">Back to Batches</span>
+                  </Link>
+                  <div className="flex items-center gap-3">
+                    <button
+                      aria-label="Cancel batch edit"
+                      className="header-icon-button"
+                      disabled={isSavingBatch}
+                      onClick={cancelBatchEdit}
+                      title="Cancel"
+                      type="button"
+                    >
+                      <FontAwesomeIcon icon={faXmark} />
+                      <span className="sr-only">Cancel</span>
+                    </button>
+                    <button
+                      aria-label="Save batch"
+                      className="header-icon-button"
+                      disabled={isSavingBatch}
+                      onClick={handleBatchSave}
+                      title={isSavingBatch ? "Saving..." : "Save Batch"}
+                      type="button"
+                    >
+                      <FontAwesomeIcon icon={faFloppyDisk} />
+                      <span className="sr-only">{isSavingBatch ? "Saving batch" : "Save batch"}</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-6">
+                  <p className="data-label">Image Batch</p>
+                  <div />
+                </div>
+                <h1 className="text-3xl font-semibold sm:text-4xl">Edit batch details</h1>
+                <p className="mt-4 max-w-3xl text-sm leading-7 text-[var(--muted)] sm:text-base">
+                  Update the batch name, notes, or current status without leaving the editor.
                 </p>
+                <div className="mt-6 grid gap-4">
+                  <label className="block space-y-2">
+                    <span className="data-label">Name</span>
+                    <input
+                      className="input-base"
+                      value={batchDraft.name}
+                      onChange={(event) => handleBatchFieldChange("name", event.target.value)}
+                      placeholder="Project Atlas invoices"
+                    />
+                  </label>
+                  <label className="block space-y-2">
+                    <span className="data-label">Description</span>
+                    <textarea
+                      className="input-base min-h-28"
+                      value={batchDraft.description}
+                      onChange={(event) => handleBatchFieldChange("description", event.target.value)}
+                      placeholder="April vendor invoices for Project Atlas"
+                    />
+                  </label>
+                  <label className="block max-w-xs space-y-2">
+                    <span className="data-label">Status</span>
+                    <select
+                      className="select-base"
+                      value={batchDraft.status}
+                      onChange={(event) =>
+                        handleBatchFieldChange(
+                          "status",
+                          event.target.value as ImageBatchInput["status"],
+                        )
+                      }
+                    >
+                      {batchStatusValues.map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
               </div>
-            ) : null}
-            <button
-              className="action-button toolbar-action w-full md:w-auto"
-              disabled={isUploading}
-              onClick={openUploadModal}
-              type="button"
-            >
-              {isUploading ? "Saving..." : "Add Documents"}
-            </button>
-          </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <Link aria-label="Back to batches" className="header-icon-button" href="/batches" title="Back to Batches">
+                    <FontAwesomeIcon icon={faArrowLeft} />
+                    <span className="sr-only">Back to Batches</span>
+                  </Link>
+                  <button
+                    aria-label="Edit batch"
+                    className="header-icon-button"
+                    onClick={beginBatchEdit}
+                    title="Edit Batch"
+                    type="button"
+                  >
+                    <FontAwesomeIcon icon={faPenToSquare} />
+                    <span className="sr-only">Edit Batch</span>
+                  </button>
+                </div>
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between xl:gap-6">
+                  <div className="min-w-0">
+                    <p className="data-label">Image Batch</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <h1 className="text-3xl font-semibold sm:text-4xl">{batch.name}</h1>
+                      <span
+                        className="status-pill"
+                        data-state={
+                          batch.status === "completed"
+                            ? "completed"
+                            : batch.status === "active"
+                              ? "reviewed"
+                              : "uploaded"
+                        }
+                      >
+                        {batch.status}
+                      </span>
+                    </div>
+                    <p className="mt-4 max-w-3xl text-sm leading-7 text-[var(--muted)] sm:text-base">
+                      {batch.description || "Add documents to this batch, run extraction, then export the full batch or one document type when review is complete."}
+                    </p>
+                  </div>
 
-          <div className="toolbar-group md:min-w-fit">
-            <p className="data-label">Exports</p>
-            <label className="mt-3 block space-y-2">
-              <span className="data-label">Scope</span>
-              <select
-                className="select-base min-w-[14rem]"
-                value={exportDocumentTypeId}
-                onChange={(event) => setExportDocumentTypeId(event.target.value)}
-              >
-                <option value="">Entire batch</option>
-                {initialDocumentTypes.map((documentType) => (
-                  <option key={documentType.id} value={documentType.id}>
-                    {documentType.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="mt-3 flex flex-wrap gap-3">
-              <button
-                aria-label="Export records as CSV"
-                className="secondary-button icon-button"
-                onClick={() => downloadExport("csv")}
-                title="Export CSV"
-                type="button"
-              >
-                <FontAwesomeIcon icon={faFileCsv} />
-                <span>CSV</span>
-              </button>
-              <button
-                aria-label="Export records as XLSX"
-                className="secondary-button icon-button"
-                onClick={() => downloadExport("xlsx")}
-                title="Export XLSX"
-                type="button"
-              >
-                <FontAwesomeIcon icon={faFileExcel} />
-                <span>XLSX</span>
-              </button>
-            </div>
-          </div>
+                  <div className="flex flex-col gap-3 xl:min-w-fit xl:items-end">
+                    <p className="data-label">Export</p>
+                    <div className="flex flex-wrap gap-3 xl:items-center xl:justify-end">
+                      <select
+                        className="select-base min-w-[14rem] xl:w-auto"
+                        value={exportDocumentTypeId}
+                        onChange={(event) => setExportDocumentTypeId(event.target.value)}
+                      >
+                        <option value="">Entire batch</option>
+                        {initialDocumentTypes.map((documentType) => (
+                          <option key={documentType.id} value={documentType.id}>
+                            {documentType.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        aria-label="Export records as CSV"
+                        className="secondary-button icon-button"
+                        onClick={() => downloadExport("csv")}
+                        title="Export CSV"
+                        type="button"
+                      >
+                        <FontAwesomeIcon icon={faFileCsv} />
+                        <span>CSV</span>
+                      </button>
+                      <button
+                        aria-label="Export records as XLSX"
+                        className="secondary-button icon-button"
+                        onClick={() => downloadExport("xlsx")}
+                        title="Export XLSX"
+                        type="button"
+                      >
+                        <FontAwesomeIcon icon={faFileExcel} />
+                        <span>XLSX</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          ) : null}
         </div>
-
       </section>
 
       {typeof document !== "undefined" && uploadModal
@@ -2183,28 +2388,50 @@ export function DocumentsWorkbench({
         : null}
 
       <section className="paper-panel p-6 sm:p-8">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex flex-wrap items-center gap-4 xl:pt-3">
+            {batch && !isEditingBatch ? (
+              <button
+                className="action-button icon-button toolbar-action"
+                disabled={isUploading}
+                onClick={openUploadModal}
+                type="button"
+              >
+                <FontAwesomeIcon icon={faPlus} />
+                <span>{isUploading ? "Saving..." : "Add Documents"}</span>
+              </button>
+            ) : null}
+            {batch ? (
+              <div className="flex flex-wrap gap-4 text-sm text-[var(--muted)]">
+                <span>{documents.length === 1 ? "1 document" : `${documents.length} documents`}</span>
+                <span>{batch.processedDocumentCount ?? 0} processed</span>
+              </div>
+            ) : null}
+          </div>
+          <button
+            className="action-button w-full xl:w-auto"
+            disabled={
+              isUploading ||
+              isExtracting ||
+              isDeleting ||
+              documents.length === 0 ||
+              selectedDocumentIds.length === 0
+            }
+            onClick={handleExtractAll}
+            type="button"
+          >
+            {isExtracting ? "Running Batch…" : "Run Batch"}
+          </button>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="data-label">Queue</p>
             <h2 className="mt-3 text-2xl font-semibold">
-              {activeBatch ? "Stored documents in this batch" : "Stored documents"}
+              {batch ? "Stored documents in this batch" : "Stored documents"}
             </h2>
           </div>
           <div className="flex w-full flex-col gap-3 sm:max-w-md sm:items-end">
-            <button
-              className="action-button w-full sm:w-auto"
-              disabled={
-                isUploading ||
-                isExtracting ||
-                isDeleting ||
-                documents.length === 0 ||
-                selectedDocumentIds.length === 0
-              }
-              onClick={handleExtractAll}
-              type="button"
-            >
-              {isExtracting ? "Running Batch…" : "Run Selected Extractions"}
-            </button>
             <label className="block w-full space-y-2">
               <span className="data-label">Filter</span>
               <input

@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+
+import { cookiePreferencesDialogEventName } from "@/lib/cookie-consent";
 
 type AiHealth = {
   connected: boolean;
@@ -32,6 +34,10 @@ const footerGroups = [
 
 export function AppFooter() {
   const [health, setHealth] = useState<AiHealth | null>(null);
+
+  function openCookiePreferences() {
+    window.dispatchEvent(new Event(cookiePreferencesDialogEventName));
+  }
 
   useEffect(() => {
     let active = true;
@@ -119,6 +125,11 @@ export function AppFooter() {
                     {link.label}
                   </Link>
                 ))}
+                {group.heading === "Legal" ? (
+                  <button className="footer-link footer-link-button" onClick={openCookiePreferences} type="button">
+                    Manage cookies
+                  </button>
+                ) : null}
               </div>
             </nav>
           ))}
