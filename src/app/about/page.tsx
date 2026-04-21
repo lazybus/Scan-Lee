@@ -18,7 +18,7 @@ export default function AboutPage() {
         <h2>Core workflow</h2>
         <p>
           Users create or duplicate a document type, upload files into a private workspace, run extraction, review the parsed fields,
-          and export approved results to CSV or XLSX. The product is designed for repeatable operational workflows rather than one-off
+          and export approved results to CSV. The product is designed for repeatable operational workflows rather than one-off
           prompt experiments.
         </p>
       </section>

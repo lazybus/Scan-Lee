@@ -1,5 +1,6 @@
 import { imageBatchInputSchema } from "@/lib/domain";
 import { getImageBatchById, updateImageBatch } from "@/lib/image-batches";
+import { getCurrentUser } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,10 +9,16 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return Response.json({ error: "Authentication required." }, { status: 401 });
+  }
+
   const { id } = await context.params;
   const item = await getImageBatchById(id);
 
-  if (!item) {
+  if (!item || item.ownerUserId !== user.id) {
     return Response.json({ error: "Image batch was not found." }, { status: 404 });
   }
 
@@ -22,7 +29,18 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return Response.json({ error: "Authentication required." }, { status: 401 });
+  }
+
   const { id } = await context.params;
+  const existing = await getImageBatchById(id);
+
+  if (!existing || existing.ownerUserId !== user.id) {
+    return Response.json({ error: "Image batch was not found." }, { status: 404 });
+  }
 
   try {
     const payload = imageBatchInputSchema.partial().parse(await request.json());

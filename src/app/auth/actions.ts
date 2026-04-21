@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import type { AuthActionState } from "@/app/auth/action-state";
+import { checkRateLimit, getRateLimitSource } from "@/lib/rate-limit";
+import { normalizeSafeNextPath } from "@/lib/security";
 import { createSupabaseServerActionClient } from "@/lib/supabase/server";
 
 const loginSchema = z.object({
@@ -20,14 +22,19 @@ const magicLinkSchema = z.object({
   email: z.email("Enter a valid email address.").trim(),
 });
 
-function normalizeNextPath(value: FormDataEntryValue | null) {
-  const candidate = String(value ?? "").trim();
+function buildRateLimitMessage(retryAfterSeconds: number) {
+  return `Too many attempts. Try again in ${retryAfterSeconds} seconds.`;
+}
 
-  if (!candidate.startsWith("/") || candidate.startsWith("//")) {
-    return "/dashboard";
-  }
+async function checkAuthRateLimit(scope: string, identity: string, limit: number, windowMs: number) {
+  const headerList = await headers();
+  const source = getRateLimitSource(headerList);
 
-  return candidate;
+  return checkRateLimit({
+    key: `auth:${scope}:${source}:${identity.toLowerCase()}`,
+    limit,
+    windowMs,
+  });
 }
 
 async function buildAuthRedirectUrl(nextPath: string) {
@@ -60,7 +67,21 @@ export async function signInWithPasswordAction(
   }
 
   const supabase = await createSupabaseServerActionClient();
-  const nextPath = normalizeNextPath(formData.get("next"));
+  const nextPath = normalizeSafeNextPath(formData.get("next"));
+  const rateLimit = await checkAuthRateLimit(
+    "password-sign-in",
+    validatedFields.data.email,
+    5,
+    15 * 60 * 1000,
+  );
+
+  if (!rateLimit.allowed) {
+    return {
+      status: "error",
+      message: buildRateLimitMessage(rateLimit.retryAfterSeconds),
+    };
+  }
+
   const { error } = await supabase.auth.signInWithPassword(validatedFields.data);
 
   if (error) {
@@ -92,7 +113,21 @@ export async function signUpWithPasswordAction(
   }
 
   const supabase = await createSupabaseServerActionClient();
-  const nextPath = normalizeNextPath(formData.get("next"));
+  const nextPath = normalizeSafeNextPath(formData.get("next"));
+  const rateLimit = await checkAuthRateLimit(
+    "password-sign-up",
+    validatedFields.data.email,
+    5,
+    15 * 60 * 1000,
+  );
+
+  if (!rateLimit.allowed) {
+    return {
+      status: "error",
+      message: buildRateLimitMessage(rateLimit.retryAfterSeconds),
+    };
+  }
+
   const emailRedirectTo = await buildAuthRedirectUrl(nextPath);
   const { data, error } = await supabase.auth.signUp({
     email: validatedFields.data.email,
@@ -139,7 +174,21 @@ export async function sendMagicLinkAction(
   }
 
   const supabase = await createSupabaseServerActionClient();
-  const nextPath = normalizeNextPath(formData.get("next"));
+  const nextPath = normalizeSafeNextPath(formData.get("next"));
+  const rateLimit = await checkAuthRateLimit(
+    "magic-link",
+    validatedFields.data.email,
+    3,
+    60 * 60 * 1000,
+  );
+
+  if (!rateLimit.allowed) {
+    return {
+      status: "error",
+      message: buildRateLimitMessage(rateLimit.retryAfterSeconds),
+    };
+  }
+
   const emailRedirectTo = await buildAuthRedirectUrl(nextPath);
   const { error } = await supabase.auth.signInWithOtp({
     email: validatedFields.data.email,

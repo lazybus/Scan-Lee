@@ -5,7 +5,6 @@ import {
   faArrowsRotate,
   faCircleCheck,
   faFileCsv,
-  faFileExcel,
   faFloppyDisk,
   faMagnifyingGlassMinus,
   faMagnifyingGlassPlus,
@@ -1829,7 +1828,7 @@ export function DocumentsWorkbench({
     });
   }
 
-  function downloadExport(kind: "csv" | "xlsx") {
+  function downloadCsvExport() {
     if (!batch) {
       setError("Open an image batch before exporting records.");
       return;
@@ -1841,12 +1840,12 @@ export function DocumentsWorkbench({
       searchParams.set("documentTypeId", exportDocumentTypeId);
     }
 
-    const exportHref = `/api/exports/${kind}?${searchParams.toString()}`;
+    const exportHref = `/api/exports/csv?${searchParams.toString()}`;
 
     trackEvent(
       "document_export",
       {
-        format: kind,
+        format: "csv",
         scope: exportDocumentTypeId ? "document_type" : "batch",
         status: "started",
       },
@@ -2357,22 +2356,12 @@ export function DocumentsWorkbench({
                       <button
                         aria-label="Export records as CSV"
                         className="secondary-button icon-button"
-                        onClick={() => downloadExport("csv")}
+                        onClick={downloadCsvExport}
                         title="Export CSV"
                         type="button"
                       >
                         <FontAwesomeIcon icon={faFileCsv} />
                         <span>CSV</span>
-                      </button>
-                      <button
-                        aria-label="Export records as XLSX"
-                        className="secondary-button icon-button"
-                        onClick={() => downloadExport("xlsx")}
-                        title="Export XLSX"
-                        type="button"
-                      >
-                        <FontAwesomeIcon icon={faFileExcel} />
-                        <span>XLSX</span>
                       </button>
                     </div>
                   </div>

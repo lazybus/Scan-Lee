@@ -27,7 +27,7 @@ export default function PrivacyPage() {
         <h2>How information is used</h2>
         <p>
           The information you provide is used to let you upload documents, run extraction against configured AI providers,
-          review parsed results, duplicate document types, and export structured records to CSV or XLSX. We also use
+          review parsed results, duplicate document types, and export structured records to CSV. We also use
           configuration and diagnostic data to keep the app available, investigate failures, and improve extraction quality.
         </p>
       </section>

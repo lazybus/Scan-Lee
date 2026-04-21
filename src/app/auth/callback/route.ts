@@ -1,22 +1,15 @@
 import { NextResponse } from "next/server";
 
+import { normalizeSafeNextPath } from "@/lib/security";
 import { hasSupabaseEnv } from "@/lib/supabase/config";
 import { createSupabaseRouteHandlerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function normalizeNextPath(value: string | null) {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) {
-    return "/dashboard";
-  }
-
-  return value;
-}
-
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const nextPath = normalizeNextPath(url.searchParams.get("next"));
+  const nextPath = normalizeSafeNextPath(url.searchParams.get("next"));
   const redirectUrl = new URL(nextPath, request.url);
 
   if (!hasSupabaseEnv()) {

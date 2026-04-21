@@ -1,5 +1,6 @@
 import { getDocumentById } from "@/lib/documents";
 import { readStoredFileBuffer } from "@/lib/storage";
+import { getCurrentUser } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,10 +9,16 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return Response.json({ error: "Authentication required." }, { status: 401 });
+  }
+
   const { id } = await context.params;
   const document = await getDocumentById(id);
 
-  if (!document) {
+  if (!document || document.ownerUserId !== user.id) {
     return Response.json({ error: "Document was not found." }, { status: 404 });
   }
 

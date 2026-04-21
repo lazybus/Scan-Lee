@@ -2,18 +2,39 @@ import { getDocumentTypeById } from "@/lib/document-types";
 import { createDocument, listDocuments } from "@/lib/documents";
 import { getImageBatchById } from "@/lib/image-batches";
 import { saveUploadedFile } from "@/lib/storage";
+import { getCurrentUser } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return Response.json({ error: "Authentication required." }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const batchId = searchParams.get("batchId") ?? undefined;
+
+  if (batchId) {
+    const imageBatch = await getImageBatchById(batchId);
+
+    if (!imageBatch || imageBatch.ownerUserId !== user.id) {
+      return Response.json({ error: "Image batch was not found." }, { status: 404 });
+    }
+  }
 
   return Response.json({ items: await listDocuments({ batchId }) });
 }
 
 export async function POST(request: Request) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return Response.json({ error: "Authentication required." }, { status: 401 });
+  }
+
   const formData = await request.formData();
   const fallbackDocumentTypeId = String(formData.get("documentTypeId") ?? "");
   const imageBatchId = String(formData.get("imageBatchId") ?? "");
@@ -42,7 +63,7 @@ export async function POST(request: Request) {
 
   const imageBatch = await getImageBatchById(imageBatchId);
 
-  if (!imageBatch) {
+  if (!imageBatch || imageBatch.ownerUserId !== user.id) {
     return Response.json({ error: "Image batch was not found." }, { status: 404 });
   }
 

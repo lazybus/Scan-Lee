@@ -7,12 +7,13 @@ import {
 } from "@/lib/supabase/server";
 
 const protectedPrefixes = ["/dashboard", "/document-types", "/documents"];
-const protectedApiPrefixes = ["/api/document-types", "/api/documents", "/api/exports"];
+const protectedApiPrefixes = [
+  "/api/document-types",
+  "/api/documents",
+  "/api/exports",
+  "/api/image-batches",
+];
 const authRoutes = new Set(["/login", "/register"]);
-
-function isDocumentFilePath(pathname: string) {
-  return pathname.startsWith("/api/documents/") && pathname.endsWith("/file");
-}
 
 function isProtectedPath(pathname: string) {
   return protectedPrefixes.some(
@@ -38,10 +39,6 @@ export async function middleware(request: NextRequest) {
   }
 
   const pathname = request.nextUrl.pathname;
-
-  if (isDocumentFilePath(pathname)) {
-    return NextResponse.next();
-  }
 
   const { response, supabase } = createSupabaseMiddlewareClient(request);
   const user = await getSupabaseMiddlewareUser(request, supabase, response);
