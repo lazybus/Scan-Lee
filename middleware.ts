@@ -6,25 +6,32 @@ import {
   getSupabaseMiddlewareUser,
 } from "@/lib/supabase/server";
 
-const protectedPrefixes = ["/dashboard", "/document-types", "/documents"];
-const protectedApiPrefixes = [
-  "/api/document-types",
-  "/api/documents",
-  "/api/exports",
-  "/api/image-batches",
-];
+const publicPaths = new Set([
+  "/",
+  "/about",
+  "/acceptable-use",
+  "/auth/callback",
+  "/contact",
+  "/cookies",
+  "/data-processing",
+  "/login",
+  "/privacy",
+  "/register",
+  "/terms",
+]);
+const publicApiPaths = new Set(["/api/health/ai"]);
 const authRoutes = new Set(["/login", "/register"]);
 
-function isProtectedPath(pathname: string) {
-  return protectedPrefixes.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+function isApiPath(pathname: string) {
+  return pathname === "/api" || pathname.startsWith("/api/");
 }
 
-function isProtectedApiPath(pathname: string) {
-  return protectedApiPrefixes.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+function isPublicPath(pathname: string) {
+  return publicPaths.has(pathname);
+}
+
+function isPublicApiPath(pathname: string) {
+  return publicApiPaths.has(pathname);
 }
 
 function buildNextPath(request: NextRequest) {
@@ -43,14 +50,16 @@ export async function middleware(request: NextRequest) {
   const { response, supabase } = createSupabaseMiddlewareClient(request);
   const user = await getSupabaseMiddlewareUser(request, supabase, response);
 
-  if (!user && isProtectedPath(pathname)) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", buildNextPath(request));
-    return NextResponse.redirect(loginUrl);
-  }
+  if (!user) {
+    if (isApiPath(pathname) && !isPublicApiPath(pathname)) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
 
-  if (!user && isProtectedApiPath(pathname)) {
-    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    if (!isPublicPath(pathname)) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("next", buildNextPath(request));
+      return NextResponse.redirect(loginUrl);
+    }
   }
 
   if (user && authRoutes.has(pathname)) {
