@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyRoute, shouldRedirectAuthenticatedUser } from "./auth-routing";
+import {
+  classifyMissingSupabaseBehavior,
+  classifyRoute,
+  shouldRedirectAuthenticatedUser,
+} from "./auth-routing";
 
 describe("route auth policy", () => {
   it.each([
@@ -38,4 +42,19 @@ describe("route auth policy", () => {
   ])("redirects authenticated users from $pathname when expected", ({ pathname, expected }) => {
     expect(shouldRedirectAuthenticatedUser(pathname)).toBe(expected);
   });
+
+  it.each([
+    { pathname: "/dashboard", nodeEnv: "development", expected: "allow" },
+    { pathname: "/api/documents", nodeEnv: "development", expected: "allow" },
+    { pathname: "/dashboard", nodeEnv: "test", expected: "allow" },
+    { pathname: "/dashboard", nodeEnv: "production", expected: "redirect-login" },
+    { pathname: "/api/documents", nodeEnv: "production", expected: "deny-api" },
+    { pathname: "/", nodeEnv: "production", expected: "allow" },
+    { pathname: "/api/health/ai", nodeEnv: "production", expected: "allow" },
+  ] as const)(
+    "handles missing Supabase config for $pathname in $nodeEnv as $expected",
+    ({ pathname, nodeEnv, expected }) => {
+      expect(classifyMissingSupabaseBehavior(pathname, nodeEnv)).toBe(expected);
+    },
+  );
 });

@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { classifyRoute, shouldRedirectAuthenticatedUser } from "@/lib/auth-routing";
+import {
+  classifyMissingSupabaseBehavior,
+  classifyRoute,
+  shouldRedirectAuthenticatedUser,
+} from "@/lib/auth-routing";
 import { hasSupabaseEnv } from "@/lib/supabase/config";
 import {
   createSupabaseMiddlewareClient,
@@ -14,11 +18,23 @@ function buildNextPath(request: NextRequest) {
 }
 
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
   if (!hasSupabaseEnv()) {
+    const missingSupabaseBehavior = classifyMissingSupabaseBehavior(pathname);
+
+    if (missingSupabaseBehavior === "deny-api") {
+      return NextResponse.json({ error: "Authentication is unavailable." }, { status: 503 });
+    }
+
+    if (missingSupabaseBehavior === "redirect-login") {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("message", "supabase-not-configured");
+      return NextResponse.redirect(loginUrl);
+    }
+
     return NextResponse.next();
   }
-
-  const pathname = request.nextUrl.pathname;
 
   const { response, supabase } = createSupabaseMiddlewareClient(request);
   const user = await getSupabaseMiddlewareUser(request, supabase, response);

@@ -1,4 +1,5 @@
 export type RouteVisibility = "public-api" | "private-api" | "public-page" | "private-page";
+export type MissingSupabaseBehavior = "allow" | "deny-api" | "redirect-login";
 
 const publicPaths = new Set([
   "/",
@@ -36,6 +37,27 @@ export function classifyRoute(pathname: string): RouteVisibility {
   }
 
   return isPublicPath(pathname) ? "public-page" : "private-page";
+}
+
+export function classifyMissingSupabaseBehavior(
+  pathname: string,
+  nodeEnv = process.env.NODE_ENV,
+): MissingSupabaseBehavior {
+  if (nodeEnv !== "production") {
+    return "allow";
+  }
+
+  const routeVisibility = classifyRoute(pathname);
+
+  if (routeVisibility === "private-api") {
+    return "deny-api";
+  }
+
+  if (routeVisibility === "private-page") {
+    return "redirect-login";
+  }
+
+  return "allow";
 }
 
 export function shouldRedirectAuthenticatedUser(pathname: string) {
