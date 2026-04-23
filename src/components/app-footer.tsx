@@ -34,6 +34,7 @@ const footerGroups = [
 
 export function AppFooter() {
   const [health, setHealth] = useState<AiHealth | null>(null);
+  const currentYear = new Date().getFullYear();
 
   function openCookiePreferences() {
     window.dispatchEvent(new Event(cookiePreferencesDialogEventName));
@@ -136,8 +137,19 @@ export function AppFooter() {
         </div>
       </div>
 
-      <div className="mt-6 border-t border-[var(--line)] pt-4 text-sm text-[var(--muted)]">
-        <p>© 2026 Scanlee. Draft legal and policy pages for the current product implementation.</p>
+      <div className="mt-6 flex flex-col gap-2 border-t border-[var(--line)] pt-4 text-sm text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between">
+        <p>© {currentYear} Scanlee</p>
+        <p>
+          Project By:{" "}
+          <Link
+            className="footer-link inline"
+            href="https://tobstudios.com"
+            rel="noreferrer"
+            target="_blank"
+          >
+            Tob Studios
+          </Link>
+        </p>
       </div>
     </footer>
   );
