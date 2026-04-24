@@ -4,7 +4,6 @@ import { DocumentsWorkbench } from "@/components/documents-workbench-client";
 import { listDocumentTypes } from "@/lib/document-types";
 import { listDocuments } from "@/lib/documents";
 import { getImageBatchById } from "@/lib/image-batches";
-import { requireUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +13,6 @@ export default async function BatchDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireUser(`/batches/${id}`);
 
   const [batch, documentTypes, documents] = await Promise.all([
     getImageBatchById(id),

@@ -1,6 +1,6 @@
 import { getExportRows } from "@/lib/documents";
 import { getImageBatchById } from "@/lib/image-batches";
-import { getCurrentUser } from "@/lib/supabase/server";
+import { requireRouteUser } from "@/lib/supabase/server";
 
 function escapeCsvValue(value: unknown) {
   if (value == null) {
@@ -36,11 +36,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const user = await getCurrentUser();
+  const routeUser = await requireRouteUser();
 
-  if (!user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+  if (routeUser instanceof Response) {
+    return routeUser;
   }
+
+  const user = routeUser;
 
   const { searchParams } = new URL(request.url);
   const batchId = searchParams.get("batchId") ?? undefined;

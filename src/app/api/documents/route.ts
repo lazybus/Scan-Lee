@@ -2,17 +2,19 @@ import { getDocumentTypeById } from "@/lib/document-types";
 import { createDocument, listDocuments } from "@/lib/documents";
 import { getImageBatchById } from "@/lib/image-batches";
 import { saveUploadedFile } from "@/lib/storage";
-import { getCurrentUser } from "@/lib/supabase/server";
+import { requireRouteUser } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const user = await getCurrentUser();
+  const routeUser = await requireRouteUser();
 
-  if (!user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+  if (routeUser instanceof Response) {
+    return routeUser;
   }
+
+  const user = routeUser;
 
   const { searchParams } = new URL(request.url);
   const batchId = searchParams.get("batchId") ?? undefined;
@@ -29,11 +31,13 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const user = await getCurrentUser();
+  const routeUser = await requireRouteUser();
 
-  if (!user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+  if (routeUser instanceof Response) {
+    return routeUser;
   }
+
+  const user = routeUser;
 
   const formData = await request.formData();
   const fallbackDocumentTypeId = String(formData.get("documentTypeId") ?? "");
@@ -89,8 +93,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Document type was not found." }, { status: 404 });
     }
 
-    const storedFile = await saveUploadedFile(file);
-    const item = await createDocument({ imageBatchId, documentTypeId, storedFile });
+    const storedFile = await saveUploadedFile(file, user.id);
+    const item = await createDocument({ imageBatchId, documentTypeId, ownerUserId: user.id, storedFile });
 
     items.push(item);
   }

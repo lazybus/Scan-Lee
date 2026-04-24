@@ -19,6 +19,7 @@ function buildNextPath(request: NextRequest) {
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const routeVisibility = classifyRoute(pathname);
 
   if (!hasSupabaseEnv()) {
     const missingSupabaseBehavior = classifyMissingSupabaseBehavior(pathname);
@@ -36,15 +37,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (routeVisibility === "private-api" || pathname.startsWith("/api/")) {
+    return NextResponse.next();
+  }
+
   const { response, supabase } = createSupabaseMiddlewareClient(request);
   const user = await getSupabaseMiddlewareUser(request, supabase, response);
-  const routeVisibility = classifyRoute(pathname);
 
   if (!user) {
-    if (routeVisibility === "private-api") {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
     if (routeVisibility === "private-page") {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("next", buildNextPath(request));

@@ -1,6 +1,5 @@
 import { ImageBatchesManager } from "@/components/image-batches-manager";
 import { ImageBatchesUnavailableError, listImageBatches } from "@/lib/image-batches";
-import { requireUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +22,6 @@ async function loadBatchesPageState() {
 }
 
 export default async function BatchesPage() {
-  await requireUser("/batches");
   const { batches, unavailable } = await loadBatchesPageState();
 
   if (unavailable) {

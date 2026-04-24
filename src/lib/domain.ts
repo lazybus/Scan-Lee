@@ -21,6 +21,9 @@ export const extractionStatusValues = [
 
 export const batchStatusValues = ["draft", "active", "completed"] as const;
 
+export const assistantProviderValues = ["google-ai", "ollama"] as const;
+export const assistantMessageRoleValues = ["user", "assistant"] as const;
+
 const baseFieldDefinitionSchema = z.object({
   key: z
     .string()
@@ -75,6 +78,19 @@ export const documentTypeSchema = documentTypeInputSchema.extend({
   isSystem: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+});
+
+export const documentTypeAssistantMessageSchema = z.object({
+  role: z.enum(assistantMessageRoleValues),
+  content: z.string().trim().min(1),
+});
+
+export const documentTypeAssistantResultSchema = z.object({
+  draft: documentTypeInputSchema,
+  analysisSummary: z.string().trim().min(1),
+  warnings: z.array(z.string().trim().min(1)).default([]),
+  providerUsed: z.enum(assistantProviderValues),
+  sampleFilePath: z.string().trim().min(1).nullable().optional(),
 });
 
 export const imageBatchInputSchema = z.object({
@@ -143,11 +159,18 @@ export type FieldDefinition = z.infer<typeof fieldDefinitionSchema>;
 export type ProductColumnDefinition = z.infer<typeof productColumnDefinitionSchema>;
 export type DocumentTypeInput = z.infer<typeof documentTypeInputSchema>;
 export type DocumentType = z.infer<typeof documentTypeSchema>;
+export type DocumentTypeAssistantMessage = z.infer<
+  typeof documentTypeAssistantMessageSchema
+>;
+export type DocumentTypeAssistantResult = z.infer<
+  typeof documentTypeAssistantResultSchema
+>;
 export type ImageBatchInput = z.infer<typeof imageBatchInputSchema>;
 export type ImageBatchRecord = z.infer<typeof imageBatchRecordSchema>;
 export type ScalarFieldKind = (typeof scalarFieldKindValues)[number];
 export type ExtractionStatus = (typeof extractionStatusValues)[number];
 export type BatchStatus = (typeof batchStatusValues)[number];
+export type AssistantProvider = (typeof assistantProviderValues)[number];
 export type DocumentRecord = z.infer<typeof documentRecordSchema>;
 
 export type TableFieldDefinition = Extract<FieldDefinition, { kind: "table" }>;

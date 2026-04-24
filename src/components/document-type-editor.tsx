@@ -13,12 +13,14 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
+import { DocumentTypeAssistant } from "@/components/document-type-assistant";
 import {
   fieldKindValues,
   normalizeFieldKey,
   scalarFieldKindValues,
   slugify,
   type DocumentType,
+  type DocumentTypeInput,
   type FieldDefinition,
   type ProductColumnDefinition,
 } from "@/lib/domain";
@@ -181,7 +183,7 @@ export function DocumentTypeEditor({
   currentUserId,
   initialDocumentType,
 }: {
-  currentUserId: string;
+  currentUserId?: string;
   initialDocumentType?: DocumentType | null;
 }) {
   const router = useRouter();
@@ -209,7 +211,8 @@ export function DocumentTypeEditor({
   const [fullWidthColumnIds, setFullWidthColumnIds] = useState<Record<string, string | null>>({});
   const isEditing = editingDocumentTypeId !== null;
   const suggestedSlug = useMemo(() => slugify(name), [name]);
-  const isOwnedByCurrentUser = initialDocumentType?.ownerUserId === currentUserId;
+  const isOwnedByCurrentUser =
+    currentUserId !== undefined && initialDocumentType?.ownerUserId === currentUserId;
   const isReadOnly = Boolean(isEditing && (!isOwnedByCurrentUser || initialDocumentType?.isSystem));
   const canDuplicate = Boolean(isEditing && isReadOnly);
   const ownershipLabel = initialDocumentType?.isSystem
@@ -571,19 +574,8 @@ export function DocumentTypeEditor({
     setDragPreview(null);
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (isReadOnly) {
-      setError("This template is read-only. Duplicate it to your account before editing.");
-      setMessage(null);
-      return;
-    }
-
-    setError(null);
-    setMessage(null);
-
-    const payload = {
+  function buildDocumentTypePayload() {
+    return {
       name,
       slug: slug || suggestedSlug,
       description,
@@ -616,6 +608,35 @@ export function DocumentTypeEditor({
           : {}),
       })),
     };
+  }
+
+  function applyAssistantDraft(draft: DocumentTypeInput) {
+    setName(draft.name);
+    setSlug(draft.slug);
+    setDescription(draft.description);
+    setPromptTemplate(draft.promptTemplate);
+    setFields(draft.fields.map(buildFieldDraftFromDefinition));
+    setExpandedFieldIds(new Set());
+    setExpandedColumnIds(new Set());
+    setFullWidthFieldId(null);
+    setFullWidthColumnIds({});
+    setMessage(`Applied AI draft for ${draft.name}. Review the fields below, then save when ready.`);
+    setError(null);
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (isReadOnly) {
+      setError("This template is read-only. Duplicate it to your account before editing.");
+      setMessage(null);
+      return;
+    }
+
+    setError(null);
+    setMessage(null);
+
+    const payload = buildDocumentTypePayload();
 
     startTransition(async () => {
       try {
@@ -747,6 +768,14 @@ export function DocumentTypeEditor({
       ) : null}
       <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
         <fieldset className="space-y-5" disabled={isPending || isReadOnly}>
+        {!isReadOnly ? (
+          <DocumentTypeAssistant
+            currentDraftSnapshot={buildDocumentTypePayload()}
+            disabled={isPending}
+            onApplyDraft={applyAssistantDraft}
+          />
+        ) : null}
+
         <div className="grid gap-5 lg:grid-cols-2">
           <label className="block space-y-2">
             <span className="data-label">Name</span>

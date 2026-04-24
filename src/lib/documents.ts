@@ -130,21 +130,28 @@ export async function getDocumentById(id: string): Promise<DocumentRecord | null
 export async function createDocument(input: {
   imageBatchId: string;
   documentTypeId: string;
+  ownerUserId?: string;
   storedFile: StoredFile;
 }): Promise<DocumentRecord> {
   const supabase = await createSupabaseServerComponentClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const ownerUserId = input.ownerUserId;
 
-  if (!user) {
-    throw new Error("Authentication required.");
+  if (!ownerUserId) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      throw new Error("Authentication required.");
+    }
+
+    input.ownerUserId = user.id;
   }
 
   const id = crypto.randomUUID();
   const insertPayload: Database["public"]["Tables"]["documents"]["Insert"] = {
     id,
-    owner_user_id: user.id,
+    owner_user_id: input.ownerUserId!,
     image_batch_id: input.imageBatchId,
     document_type_id: input.documentTypeId,
     original_name: input.storedFile.originalName,

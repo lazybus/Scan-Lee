@@ -238,23 +238,58 @@ export async function extractDocumentWithGoogleAi(input: {
   };
 }
 
+export async function generateDocumentTypeDraftWithGoogleAi(input: {
+  prompt: string;
+  filePath?: string | null;
+  mimeType?: string | null;
+  storageBucket?: string;
+}): Promise<Record<string, unknown>> {
+  const imageBase64 = input.filePath
+    ? await readStoredFileAsBase64(input.filePath, input.storageBucket)
+    : undefined;
+  const rawMimeType = input.mimeType?.trim();
+  const mimeType =
+    rawMimeType && rawMimeType.length > 0
+      ? rawMimeType
+      : input.filePath
+        ? inferMimeType(input.filePath)
+        : undefined;
+
+  const rawResponse = await requestGoogleAiJsonResponse({
+    imageBase64,
+    mimeType,
+    systemPrompt:
+      "You design structured extraction schemas for business documents. Return JSON only.",
+    userPrompt: input.prompt,
+  });
+
+  return parseGoogleAiJsonObject(rawResponse);
+}
+
 async function requestGoogleAiJsonResponse(input: {
-  imageBase64: string;
-  mimeType: string;
+  imageBase64?: string;
+  mimeType?: string;
   systemPrompt: string;
   userPrompt: string;
 }) {
   try {
     const client = createClient();
-    const imagePart: Part = {
-      inlineData: {
-        data: input.imageBase64,
-        mimeType: input.mimeType,
-      },
-    };
+    const contents: Array<Part | string> = [input.userPrompt];
+
+    if (input.imageBase64 && input.mimeType) {
+      const imagePart: Part = {
+        inlineData: {
+          data: input.imageBase64,
+          mimeType: input.mimeType,
+        },
+      };
+
+      contents.unshift(imagePart);
+    }
+
     const response = await client.models.generateContent({
       model: modelName,
-      contents: [imagePart, input.userPrompt],
+      contents,
       config: {
         systemInstruction: input.systemPrompt,
         temperature: 0.1,

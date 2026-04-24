@@ -199,11 +199,43 @@ export async function extractDocumentWithOllama(input: {
   };
 }
 
+export async function generateDocumentTypeDraftWithOllama(input: {
+  prompt: string;
+  filePath?: string | null;
+  storageBucket?: string;
+}): Promise<Record<string, unknown>> {
+  const imageBase64 = input.filePath
+    ? await readStoredFileAsBase64(input.filePath, input.storageBucket)
+    : undefined;
+
+  const rawResponse = await requestOllamaJsonResponse({
+    imageBase64,
+    systemPrompt:
+      "You design structured extraction schemas for business documents. Return JSON only.",
+    userPrompt: input.prompt,
+  });
+
+  return parseOllamaJsonObject(rawResponse);
+}
+
 async function requestOllamaJsonResponse(input: {
-  imageBase64: string;
+  imageBase64?: string;
   systemPrompt: string;
   userPrompt: string;
 }) {
+  const userMessage: {
+    role: "user";
+    content: string;
+    images?: string[];
+  } = {
+    role: "user",
+    content: input.userPrompt,
+  };
+
+  if (input.imageBase64) {
+    userMessage.images = [input.imageBase64];
+  }
+
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: {
@@ -219,11 +251,7 @@ async function requestOllamaJsonResponse(input: {
           role: "system",
           content: input.systemPrompt,
         },
-        {
-          role: "user",
-          content: input.userPrompt,
-          images: [input.imageBase64],
-        },
+        userMessage,
       ],
       options: {
         temperature: 0.1,

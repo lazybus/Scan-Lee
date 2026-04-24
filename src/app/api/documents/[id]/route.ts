@@ -4,7 +4,7 @@ import { getDocumentTypeById } from "@/lib/document-types";
 import { extractedRecordSchema, normalizeExtractedData, type ExtractedRecord } from "@/lib/domain";
 import { deleteDocument, getDocumentById, updateDocumentReview } from "@/lib/documents";
 import { deleteStoredFile } from "@/lib/storage";
-import { getCurrentUser } from "@/lib/supabase/server";
+import { requireRouteUser } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,11 +40,13 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const user = await getCurrentUser();
+  const routeUser = await requireRouteUser();
 
-  if (!user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+  if (routeUser instanceof Response) {
+    return routeUser;
   }
+
+  const user = routeUser;
 
   const { id } = await context.params;
   const document = await getDocumentById(id);
@@ -82,11 +84,13 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const user = await getCurrentUser();
+  const routeUser = await requireRouteUser();
 
-  if (!user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+  if (routeUser instanceof Response) {
+    return routeUser;
   }
+
+  const user = routeUser;
 
   const { id } = await context.params;
   const document = await getDocumentById(id);

@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { NextResponse, type NextRequest } from "next/server";
@@ -117,6 +118,24 @@ export async function createSupabaseRouteHandlerClient() {
   return createSupabaseServerActionClient();
 }
 
+export async function getCurrentRouteUser() {
+  const supabase = await createSupabaseRouteHandlerClient();
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    return user;
+  } catch (error) {
+    if (isRefreshTokenNotFoundError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
 export async function getCurrentUser() {
   const supabase = await createSupabaseServerComponentClient();
 
@@ -133,6 +152,16 @@ export async function getCurrentUser() {
 
     throw error;
   }
+}
+
+export async function requireRouteUser(): Promise<Response | User> {
+  const user = await getCurrentRouteUser();
+
+  if (!user) {
+    return Response.json({ error: "Authentication required." }, { status: 401 });
+  }
+
+  return user;
 }
 
 export async function requireUser(nextPath = "/dashboard") {

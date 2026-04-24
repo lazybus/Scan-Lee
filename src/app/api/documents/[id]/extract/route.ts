@@ -1,7 +1,7 @@
 import { extractStoredDocument } from "@/lib/document-extraction";
 import { getDocumentById } from "@/lib/documents";
 import { checkRateLimit, getRateLimitSource } from "@/lib/rate-limit";
-import { getCurrentUser } from "@/lib/supabase/server";
+import { requireRouteUser } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,11 +10,13 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const user = await getCurrentUser();
+  const routeUser = await requireRouteUser();
 
-  if (!user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+  if (routeUser instanceof Response) {
+    return routeUser;
   }
+
+  const user = routeUser;
 
   const { id } = await context.params;
   const document = await getDocumentById(id);

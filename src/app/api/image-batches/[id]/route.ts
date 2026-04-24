@@ -1,6 +1,6 @@
 import { imageBatchInputSchema } from "@/lib/domain";
 import { getImageBatchById, updateImageBatch } from "@/lib/image-batches";
-import { getCurrentUser } from "@/lib/supabase/server";
+import { requireRouteUser } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,11 +9,13 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const user = await getCurrentUser();
+  const routeUser = await requireRouteUser();
 
-  if (!user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+  if (routeUser instanceof Response) {
+    return routeUser;
   }
+
+  const user = routeUser;
 
   const { id } = await context.params;
   const item = await getImageBatchById(id);
@@ -29,11 +31,13 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const user = await getCurrentUser();
+  const routeUser = await requireRouteUser();
 
-  if (!user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+  if (routeUser instanceof Response) {
+    return routeUser;
   }
+
+  const user = routeUser;
 
   const { id } = await context.params;
   const existing = await getImageBatchById(id);
