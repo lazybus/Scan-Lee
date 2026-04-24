@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  faArrowLeft,
   faChevronDown,
   faChevronUp,
   faExpand,
@@ -8,9 +9,10 @@ import {
   faPlus,
   faTableColumns,
   faTrashCan,
+  faWandMagicSparkles,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { DocumentTypeAssistant } from "@/components/document-type-assistant";
@@ -209,12 +211,15 @@ export function DocumentTypeEditor({
   const [expandedColumnIds, setExpandedColumnIds] = useState<Set<string>>(() => new Set());
   const [fullWidthFieldId, setFullWidthFieldId] = useState<string | null>(null);
   const [fullWidthColumnIds, setFullWidthColumnIds] = useState<Record<string, string | null>>({});
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  const editorFormRef = useRef<HTMLDivElement | null>(null);
   const isEditing = editingDocumentTypeId !== null;
   const suggestedSlug = useMemo(() => slugify(name), [name]);
   const isOwnedByCurrentUser =
     currentUserId !== undefined && initialDocumentType?.ownerUserId === currentUserId;
   const isReadOnly = Boolean(isEditing && (!isOwnedByCurrentUser || initialDocumentType?.isSystem));
   const canDuplicate = Boolean(isEditing && isReadOnly);
+  const canToggleAssistant = !isEditing && !isReadOnly;
   const ownershipLabel = initialDocumentType?.isSystem
     ? "Built-in default"
     : isOwnedByCurrentUser
@@ -235,6 +240,7 @@ export function DocumentTypeEditor({
     setExpandedColumnIds(new Set());
     setFullWidthFieldId(null);
     setFullWidthColumnIds({});
+    setIsAssistantOpen(false);
     setMessage(null);
     setError(null);
     setActiveReorder(null);
@@ -620,8 +626,12 @@ export function DocumentTypeEditor({
     setExpandedColumnIds(new Set());
     setFullWidthFieldId(null);
     setFullWidthColumnIds({});
+    setIsAssistantOpen(false);
     setMessage(`Applied AI draft for ${draft.name}. Review the fields below, then save when ready.`);
     setError(null);
+    window.requestAnimationFrame(() => {
+      editorFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -736,6 +746,11 @@ export function DocumentTypeEditor({
               ? "Changes apply to the stored document type definition and future extraction runs. Existing extracted records remain unchanged."
               : "Create a reusable schema for a document layout and define the fields Ollama should return."}
           </p>
+          {canToggleAssistant ? (
+            <p className="mt-2 text-sm leading-7 text-[var(--muted)]">
+              The assistant can generate a starter schema from a prompt, a sample image, or both.
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-3">
           {canDuplicate ? (
@@ -743,8 +758,23 @@ export function DocumentTypeEditor({
               {isPending ? "Duplicating…" : "Duplicate to My Account"}
             </button>
           ) : null}
+          {canToggleAssistant ? (
+            <button
+              aria-expanded={isAssistantOpen}
+              className="secondary-button"
+              onClick={() => setIsAssistantOpen((current) => !current)}
+              type="button"
+            >
+              <FontAwesomeIcon aria-hidden="true" icon={faWandMagicSparkles} />
+              <span>{isAssistantOpen ? "Hide Assistant" : "Open Assistant"}</span>
+              <span className="inline-flex items-center rounded-full border border-[color:color-mix(in_srgb,var(--accent)_55%,var(--line))] bg-[color:color-mix(in_srgb,var(--accent)_16%,transparent)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--accent)]">
+                New
+              </span>
+            </button>
+          ) : null}
           <button className="secondary-button" onClick={() => router.push("/document-types")} type="button">
-            Back to Types
+            <FontAwesomeIcon aria-hidden="true" icon={faArrowLeft} />
+            <span>Back to Types</span>
           </button>
         </div>
       </div>
@@ -768,15 +798,15 @@ export function DocumentTypeEditor({
       ) : null}
       <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
         <fieldset className="space-y-5" disabled={isPending || isReadOnly}>
-        {!isReadOnly ? (
+        {!isReadOnly && (!canToggleAssistant || isAssistantOpen) ? (
           <DocumentTypeAssistant
             currentDraftSnapshot={buildDocumentTypePayload()}
             disabled={isPending}
-            onApplyDraft={applyAssistantDraft}
+            onCreateType={applyAssistantDraft}
           />
         ) : null}
 
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="grid gap-5 lg:grid-cols-2" id="document-type-editor-fields" ref={editorFormRef}>
           <label className="block space-y-2">
             <span className="data-label">Name</span>
             <input

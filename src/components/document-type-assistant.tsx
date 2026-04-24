@@ -1,6 +1,6 @@
 "use client";
 
-import { faPaperPlane, faTrashCan, faWandMagicSparkles } from "@fortawesome/free-solid-svg-icons";
+import { faPaperPlane, faPlus, faTrashCan, faWandMagicSparkles } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import Image from "next/image";
 import { useEffect, useState, useTransition } from "react";
@@ -18,11 +18,11 @@ type AssistantApiResponse = DocumentTypeAssistantResult & {
 export function DocumentTypeAssistant({
   currentDraftSnapshot,
   disabled = false,
-  onApplyDraft,
+  onCreateType,
 }: {
   currentDraftSnapshot: Record<string, unknown>;
   disabled?: boolean;
-  onApplyDraft: (draft: DocumentTypeInput) => void;
+  onCreateType: (draft: DocumentTypeInput) => void;
 }) {
   const [isPending, startTransition] = useTransition();
   const [conversation, setConversation] = useState<DocumentTypeAssistantMessage[]>([]);
@@ -162,8 +162,8 @@ export function DocumentTypeAssistant({
     startTransition(async () => {
       try {
         await cleanupSample();
-        onApplyDraft(generatedDraft);
-        setMessage("Applied the AI draft to the manual editor.");
+        onCreateType(generatedDraft);
+        setMessage("Loaded the AI draft into the editor below.");
       } catch (applyError) {
         setError(applyError instanceof Error ? applyError.message : "Draft could not be applied.");
       }
@@ -187,6 +187,14 @@ export function DocumentTypeAssistant({
   }
 
   const isBusy = disabled || isPending;
+  const hasAssistantSession =
+    conversation.length > 0 ||
+    generatedDraft !== null ||
+    analysisSummary !== null ||
+    warnings.length > 0 ||
+    selectedSampleFile !== null ||
+    sampleFilePath !== null ||
+    instruction.trim().length > 0;
 
   return (
     <section className="space-y-5 border-2 border-[var(--line)] bg-[var(--panel)] p-5 sm:p-6">
@@ -236,25 +244,16 @@ export function DocumentTypeAssistant({
               type="button"
             >
               <FontAwesomeIcon aria-hidden="true" icon={faPaperPlane} />
-              <span>{isPending ? "Generating…" : generatedDraft ? "Refine Draft" : "Generate Draft"}</span>
-            </button>
-            <button
-              className="secondary-button"
-              disabled={isBusy || !generatedDraft}
-              onClick={handleApply}
-              type="button"
-            >
-              <FontAwesomeIcon aria-hidden="true" icon={faWandMagicSparkles} />
-              <span>Apply to Editor</span>
+              <span>{isPending ? "Generating…" : "Generate"}</span>
             </button>
             <button
               className="danger-button"
-              disabled={isBusy && !generatedDraft && !sampleFilePath && !selectedSampleFile}
+              disabled={isBusy || !hasAssistantSession}
               onClick={handleDiscard}
               type="button"
             >
               <FontAwesomeIcon aria-hidden="true" icon={faTrashCan} />
-              <span>Discard Assistant Session</span>
+              <span>Discard Session</span>
             </button>
           </div>
 
@@ -303,6 +302,13 @@ export function DocumentTypeAssistant({
               {analysisSummary ?? "The assistant summary and detected schema will appear here after generation."}
             </p>
           </div>
+
+          {generatedDraft && analysisSummary ? (
+            <button className="action-button" disabled={isBusy} onClick={handleApply} type="button">
+              <FontAwesomeIcon aria-hidden="true" icon={faPlus} />
+              <span>Create Type</span>
+            </button>
+          ) : null}
 
           {samplePreviewUrl ? (
             <div className="space-y-2">
